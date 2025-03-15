@@ -52,11 +52,6 @@ jobs:
 
       - uses: actions/checkout@v4
 
-      # - name: Debug filetree
-      #   run: |
-      #     apt install tree
-      #     tree -L 5
-
       - name: Restore cache
         if: ${{ !env.ACT }}
         uses: actions/cache@v3
