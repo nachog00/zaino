@@ -63,6 +63,14 @@ jobs:
       - name: Cargo cache
         uses: Swatinem/rust-cache@v2
 
+      - name: Skip compilation if cached
+        run: |
+          if [ "${{ steps.cache.outputs.cache-hit }}" == "true" ]; then
+              echo "Using cached build artifacts" && exit 0
+          else
+              cargo build --all-targets
+          fi
+
       - name: Build and archive tests
         run: cargo nextest archive --verbose --workspace --all-features --archive-file nextest-archive.tar.zst
 
