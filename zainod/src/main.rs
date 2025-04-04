@@ -25,6 +25,8 @@ async fn main() {
         .with_target(true)
         .init();
 
+    println!("this print's only purpouse is to trigger a recompile in CI to try out the cache");
+
     let args = Args::parse();
 
     if std::env::args().any(|arg| arg == "--version" || arg == "-V") {
