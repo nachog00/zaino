@@ -445,6 +445,10 @@ impl Drop for TestManager {
 mod launch_testmanager {
     use super::*;
 
+    mod zebrad {}
+
+    mod zcashd {}
+
     #[tokio::test]
     async fn zebrad() {
         let mut test_manager = TestManager::launch("zebrad", None, None, false, true, true, false)
