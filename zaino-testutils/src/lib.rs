@@ -445,21 +445,124 @@ impl Drop for TestManager {
 mod launch_testmanager {
     use super::*;
 
-    mod zebrad {}
+    mod zebrad {
 
-    mod zcashd {}
+        use super::*;
 
-    #[tokio::test]
-    async fn zebrad() {
-        let mut test_manager = TestManager::launch("zebrad", None, None, false, true, true, false)
+        #[tokio::test]
+        async fn zebrad() {
+            let mut test_manager =
+                TestManager::launch("zebrad", None, None, false, true, true, false)
+                    .await
+                    .unwrap();
+            assert_eq!(
+                1,
+                u32::from(test_manager.local_net.get_chain_height().await)
+            );
+            test_manager.close().await;
+        }
+
+        #[tokio::test]
+        async fn zebrad_with_chain() {
+            let mut test_manager = TestManager::launch(
+                "zebrad",
+                None,
+                ZEBRAD_CHAIN_CACHE_DIR.clone(),
+                false,
+                true,
+                true,
+                false,
+            )
             .await
             .unwrap();
-        assert_eq!(
-            1,
-            u32::from(test_manager.local_net.get_chain_height().await)
-        );
-        test_manager.close().await;
+            assert_eq!(
+                52,
+                u32::from(test_manager.local_net.get_chain_height().await)
+            );
+            test_manager.close().await;
+        }
+
+        #[tokio::test]
+        async fn zebrad_generate_blocks() {
+            let mut test_manager =
+                TestManager::launch("zebrad", None, None, false, true, true, false)
+                    .await
+                    .unwrap();
+            assert_eq!(
+                1,
+                u32::from(test_manager.local_net.get_chain_height().await)
+            );
+            test_manager.local_net.generate_blocks(1).await.unwrap();
+            assert_eq!(
+                2,
+                u32::from(test_manager.local_net.get_chain_height().await)
+            );
+            test_manager.close().await;
+        }
+
+        #[tokio::test]
+        async fn zebrad_zaino() {
+            let mut test_manager =
+                TestManager::launch("zebrad", None, None, true, true, true, false)
+                    .await
+                    .unwrap();
+            let mut grpc_client =
+                zingo_infra_testutils::client::build_client(services::network::localhost_uri(
+                    test_manager
+                        .zaino_grpc_listen_address
+                        .expect("Zaino listen port not available but zaino is active.")
+                        .port(),
+                ))
+                .await
+                .unwrap();
+            dbg!(grpc_client
+                .get_lightd_info(tonic::Request::new(
+                    zcash_client_backend::proto::service::Empty {},
+                ))
+                .await
+                .unwrap());
+            test_manager.close().await;
+        }
+
+        #[tokio::test]
+        async fn zebrad_zaino_clients() {
+            let mut test_manager =
+                TestManager::launch("zebrad", None, None, true, true, true, true)
+                    .await
+                    .unwrap();
+            let clients = test_manager
+                .clients
+                .as_ref()
+                .expect("Clients are not initialized");
+            dbg!(clients.faucet.do_info().await);
+            dbg!(clients.recipient.do_info().await);
+            test_manager.close().await;
+        }
+
+        #[tokio::test]
+        async fn zebrad_zaino_testnet() {
+            let mut test_manager = TestManager::launch(
+                "zebrad",
+                Some(services::network::Network::Testnet),
+                ZEBRAD_TESTNET_CACHE_DIR.clone(),
+                true,
+                true,
+                true,
+                true,
+            )
+            .await
+            .unwrap();
+            let clients = test_manager
+                .clients
+                .as_ref()
+                .expect("Clients are not initialized");
+            dbg!(clients.faucet.do_info().await);
+            dbg!(clients.recipient.do_info().await);
+            test_manager.close().await;
+        }
     }
+
+    mod zcashd {}
 
     #[tokio::test]
     async fn zcashd() {
@@ -468,23 +571,6 @@ mod launch_testmanager {
             .unwrap();
         assert_eq!(
             1,
-            u32::from(test_manager.local_net.get_chain_height().await)
-        );
-        test_manager.close().await;
-    }
-
-    #[tokio::test]
-    async fn zebrad_generate_blocks() {
-        let mut test_manager = TestManager::launch("zebrad", None, None, false, true, true, false)
-            .await
-            .unwrap();
-        assert_eq!(
-            1,
-            u32::from(test_manager.local_net.get_chain_height().await)
-        );
-        test_manager.local_net.generate_blocks(1).await.unwrap();
-        assert_eq!(
-            2,
             u32::from(test_manager.local_net.get_chain_height().await)
         );
         test_manager.close().await;
@@ -502,26 +588,6 @@ mod launch_testmanager {
         test_manager.local_net.generate_blocks(1).await.unwrap();
         assert_eq!(
             2,
-            u32::from(test_manager.local_net.get_chain_height().await)
-        );
-        test_manager.close().await;
-    }
-
-    #[tokio::test]
-    async fn zebrad_with_chain() {
-        let mut test_manager = TestManager::launch(
-            "zebrad",
-            None,
-            ZEBRAD_CHAIN_CACHE_DIR.clone(),
-            false,
-            true,
-            true,
-            false,
-        )
-        .await
-        .unwrap();
-        assert_eq!(
-            52,
             u32::from(test_manager.local_net.get_chain_height().await)
         );
         test_manager.close().await;
@@ -548,29 +614,6 @@ mod launch_testmanager {
     }
 
     #[tokio::test]
-    async fn zebrad_zaino() {
-        let mut test_manager = TestManager::launch("zebrad", None, None, true, true, true, false)
-            .await
-            .unwrap();
-        let mut grpc_client =
-            zingo_infra_testutils::client::build_client(services::network::localhost_uri(
-                test_manager
-                    .zaino_grpc_listen_address
-                    .expect("Zaino listen port not available but zaino is active.")
-                    .port(),
-            ))
-            .await
-            .unwrap();
-        dbg!(grpc_client
-            .get_lightd_info(tonic::Request::new(
-                zcash_client_backend::proto::service::Empty {},
-            ))
-            .await
-            .unwrap());
-        test_manager.close().await;
-    }
-
-    #[tokio::test]
     async fn zcashd_zaino() {
         let mut test_manager = TestManager::launch("zcashd", None, None, true, true, true, false)
             .await
@@ -590,20 +633,6 @@ mod launch_testmanager {
             ))
             .await
             .unwrap());
-        test_manager.close().await;
-    }
-
-    #[tokio::test]
-    async fn zebrad_zaino_clients() {
-        let mut test_manager = TestManager::launch("zebrad", None, None, true, true, true, true)
-            .await
-            .unwrap();
-        let clients = test_manager
-            .clients
-            .as_ref()
-            .expect("Clients are not initialized");
-        dbg!(clients.faucet.do_info().await);
-        dbg!(clients.recipient.do_info().await);
         test_manager.close().await;
     }
 
@@ -807,28 +836,6 @@ mod launch_testmanager {
             250_000
         );
 
-        test_manager.close().await;
-    }
-
-    #[tokio::test]
-    async fn zebrad_zaino_testnet() {
-        let mut test_manager = TestManager::launch(
-            "zebrad",
-            Some(services::network::Network::Testnet),
-            ZEBRAD_TESTNET_CACHE_DIR.clone(),
-            true,
-            true,
-            true,
-            true,
-        )
-        .await
-        .unwrap();
-        let clients = test_manager
-            .clients
-            .as_ref()
-            .expect("Clients are not initialized");
-        dbg!(clients.faucet.do_info().await);
-        dbg!(clients.recipient.do_info().await);
         test_manager.close().await;
     }
 }
