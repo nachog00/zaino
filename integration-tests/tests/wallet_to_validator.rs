@@ -8,7 +8,7 @@ use zaino_testutils::TestManager;
 use zingo_infra_testutils::services::validator::Validator;
 use zingolib::testutils::lightclient::from_inputs;
 
-async fn connect_to_node_get_info(validator: &str) {
+async fn connect_to_node_get_info_for_validator(validator: &str) {
     let mut test_manager = TestManager::launch(validator, None, None, true, true, true, true)
         .await
         .unwrap();
@@ -23,7 +23,7 @@ async fn connect_to_node_get_info(validator: &str) {
     test_manager.close().await;
 }
 
-async fn send_to_orchard(validator: &str) {
+async fn send_to_orchard_for_validator(validator: &str) {
     let mut test_manager = TestManager::launch(validator, None, None, true, true, true, true)
         .await
         .unwrap();
@@ -71,7 +71,7 @@ async fn send_to_orchard(validator: &str) {
     test_manager.close().await;
 }
 
-async fn shield(validator: &str) {
+async fn shield_for_validator(validator: &str) {
     let mut test_manager = TestManager::launch(validator, None, None, true, true, true, true)
         .await
         .unwrap();
@@ -144,7 +144,7 @@ async fn shield(validator: &str) {
     test_manager.close().await;
 }
 
-async fn send_to_sapling(validator: &str) {
+async fn send_to_sapling_for_validator(validator: &str) {
     let mut test_manager = TestManager::launch(validator, None, None, true, true, true, true)
         .await
         .unwrap();
@@ -192,7 +192,7 @@ async fn send_to_sapling(validator: &str) {
     test_manager.close().await;
 }
 
-async fn send_to_all(validator: &str) {
+async fn send_to_all_for_validator(validator: &str) {
     let mut test_manager = TestManager::launch(validator, None, None, true, true, true, true)
         .await
         .unwrap();
@@ -299,7 +299,7 @@ async fn send_to_all(validator: &str) {
     test_manager.close().await;
 }
 
-async fn monitor_unverified_mempool(validator: &str) {
+async fn monitor_unverified_mempool_for_validator(validator: &str) {
     let mut test_manager = TestManager::launch(validator, None, None, true, true, true, true)
         .await
         .unwrap();
@@ -446,7 +446,7 @@ async fn monitor_unverified_mempool(validator: &str) {
     test_manager.close().await;
 }
 
-async fn send_to_transparent(validator: &str) {
+async fn send_to_transparent_for_validator(validator: &str) {
     let mut test_manager = TestManager::launch(validator, None, None, true, true, true, true)
         .await
         .unwrap();
@@ -561,38 +561,38 @@ mod zcashd {
     use super::*;
 
     #[tokio::test]
-    async fn zcashd_connect_to_node_get_info() {
-        connect_to_node_get_info("zcashd").await;
+    async fn connect_to_node_get_info() {
+        connect_to_node_get_info_for_validator("zcashd").await;
     }
 
     #[tokio::test]
-    async fn zcashd_send_to_orchard() {
-        send_to_orchard("zcashd").await;
+    async fn send_to_orchard() {
+        send_to_orchard_for_validator("zcashd").await;
     }
 
     #[tokio::test]
-    async fn zcashd_send_to_sapling() {
-        send_to_sapling("zcashd").await;
+    async fn send_to_sapling() {
+        send_to_sapling_for_validator("zcashd").await;
     }
 
     #[tokio::test]
-    async fn zcashd_send_to_transparent() {
-        send_to_transparent("zcashd").await;
+    async fn send_to_transparent() {
+        send_to_transparent_for_validator("zcashd").await;
     }
 
     #[tokio::test]
-    async fn zcashd_send_to_all() {
-        send_to_all("zcashd").await;
+    async fn send_to_all() {
+        send_to_all_for_validator("zcashd").await;
     }
 
     #[tokio::test]
-    async fn zcashd_shield() {
-        shield("zcashd").await;
+    async fn shield() {
+        shield_for_validator("zcashd").await;
     }
 
     #[tokio::test]
-    async fn zcashd_monitor_unverified_mempool() {
-        monitor_unverified_mempool("zcashd").await;
+    async fn monitor_unverified_mempool() {
+        monitor_unverified_mempool_for_validator("zcashd").await;
     }
 }
 
@@ -601,39 +601,39 @@ mod zebrad {
     use super::*;
 
     #[tokio::test]
-    async fn zebrad_connect_to_node_get_info() {
-        connect_to_node_get_info("zebrad").await;
+    async fn connect_to_node_get_info() {
+        connect_to_node_get_info_for_validator("zebrad").await;
     }
 
     #[tokio::test]
-    async fn zebrad_send_to_orchard() {
-        send_to_orchard("zebrad").await;
+    async fn send_to_orchard() {
+        send_to_orchard_for_validator("zebrad").await;
     }
 
     #[tokio::test]
-    async fn zebrad_shield() {
-        shield("zebrad").await;
+    async fn shield() {
+        shield_for_validator("zebrad").await;
     }
 
     #[tokio::test]
-    async fn zebrad_send_to_sapling() {
-        send_to_sapling("zebrad").await;
+    async fn send_to_sapling() {
+        send_to_sapling_for_validator("zebrad").await;
     }
 
     /// Bug documented in https://github.com/zingolabs/zaino/issues/145.
     #[tokio::test]
-    async fn zebrad_send_to_transparent() {
-        send_to_transparent("zebrad").await;
+    async fn send_to_transparent() {
+        send_to_transparent_for_validator("zebrad").await;
     }
 
     #[tokio::test]
-    async fn zebrad_send_to_all() {
-        send_to_all("zebrad").await;
+    async fn send_to_all() {
+        send_to_all_for_validator("zebrad").await;
     }
 
     /// Bug documented in https://github.com/zingolabs/zaino/issues/144.
     #[tokio::test]
-    async fn zebrad_monitor_unverified_mempool() {
-        monitor_unverified_mempool("zebrad").await;
+    async fn monitor_unverified_mempool() {
+        monitor_unverified_mempool_for_validator("zebrad").await;
     }
 }
