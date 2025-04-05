@@ -565,7 +565,7 @@ mod launch_testmanager {
         /// This is not the case with Zcashd and should not be the case here.
         /// Even if rewards need 100 confirmations these blocks should not have to be mined at the same time.
         #[tokio::test]
-        async fn zebrad_zaino_clients_receive_mining_reward() {
+        async fn zaino_clients_receive_mining_reward() {
             let mut test_manager =
                 TestManager::launch("zebrad", None, None, true, true, true, true)
                     .await
@@ -594,7 +594,7 @@ mod launch_testmanager {
         }
 
         #[tokio::test]
-        async fn zebrad_zaino_clients_receive_mining_reward_and_send() {
+        async fn zaino_clients_receive_mining_reward_and_send() {
             let mut test_manager =
                 TestManager::launch("zebrad", None, None, true, true, true, true)
                     .await
