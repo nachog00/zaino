@@ -670,7 +670,10 @@ mod launch_testmanager {
         }
     }
 
-    mod zcashd {}
+    mod zcashd {
+
+        use super::*;
+    }
 
     #[tokio::test]
     async fn zcashd() {
