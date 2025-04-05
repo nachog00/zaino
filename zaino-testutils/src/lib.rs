@@ -675,7 +675,7 @@ mod launch_testmanager {
         use super::*;
 
         #[tokio::test]
-        async fn zcashd() {
+        async fn basic() {
             let mut test_manager =
                 TestManager::launch("zcashd", None, None, false, true, true, false)
                     .await
@@ -688,7 +688,7 @@ mod launch_testmanager {
         }
 
         #[tokio::test]
-        async fn zcashd_generate_blocks() {
+        async fn generate_blocks() {
             let mut test_manager =
                 TestManager::launch("zcashd", None, None, false, true, true, false)
                     .await
@@ -706,7 +706,7 @@ mod launch_testmanager {
         }
 
         #[tokio::test]
-        async fn zcashd_with_chain() {
+        async fn with_chain() {
             let mut test_manager = TestManager::launch(
                 "zcashd",
                 None,
@@ -726,7 +726,7 @@ mod launch_testmanager {
         }
 
         #[tokio::test]
-        async fn zcashd_zaino() {
+        async fn zaino() {
             let mut test_manager =
                 TestManager::launch("zcashd", None, None, true, true, true, false)
                     .await
@@ -750,7 +750,7 @@ mod launch_testmanager {
         }
 
         #[tokio::test]
-        async fn zcashd_zaino_clients() {
+        async fn zaino_clients() {
             let mut test_manager =
                 TestManager::launch("zcashd", None, None, true, true, true, true)
                     .await
@@ -765,7 +765,7 @@ mod launch_testmanager {
         }
 
         #[tokio::test]
-        async fn zcashd_zaino_clients_receive_mining_reward() {
+        async fn zaino_clients_receive_mining_reward() {
             let mut test_manager =
                 TestManager::launch("zcashd", None, None, true, true, true, true)
                     .await
@@ -790,7 +790,7 @@ mod launch_testmanager {
         }
 
         #[tokio::test]
-        async fn zcashd_zaino_clients_receive_mining_reward_and_send() {
+        async fn zaino_clients_receive_mining_reward_and_send() {
             let mut test_manager =
                 TestManager::launch("zcashd", None, None, true, true, true, true)
                     .await
