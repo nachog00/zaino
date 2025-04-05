@@ -80,51 +80,11 @@ async fn create_test_manager_and_block_cache(
     )
 }
 
-#[tokio::test]
-async fn zcashd_local_cache_launch_no_db() {
-    launch_local_cache("zcashd", true).await;
-}
-
-#[tokio::test]
-async fn zebrad_local_cache_launch_no_db() {
-    launch_local_cache("zebrad", true).await;
-}
-
-#[tokio::test]
-async fn zcashd_local_cache_launch_with_db() {
-    launch_local_cache("zcashd", false).await;
-}
-
-#[tokio::test]
-async fn zebrad_local_cache_launch_with_db() {
-    launch_local_cache("zebrad", false).await;
-}
-
 async fn launch_local_cache(validator: &str, no_db: bool) {
     let (_test_manager, _json_service, _block_cache, block_cache_subscriber) =
         create_test_manager_and_block_cache(validator, None, false, true, no_db, false).await;
 
     dbg!(block_cache_subscriber.status());
-}
-
-#[tokio::test]
-async fn zebrad_local_cache_process_100_blocks() {
-    launch_local_cache_process_n_block_batches("zebrad", 1).await;
-}
-
-#[tokio::test]
-async fn zcashd_local_cache_process_100_blocks() {
-    launch_local_cache_process_n_block_batches("zcashd", 1).await;
-}
-
-#[tokio::test]
-async fn zebrad_local_cache_process_200_blocks() {
-    launch_local_cache_process_n_block_batches("zebrad", 2).await;
-}
-
-#[tokio::test]
-async fn zcashd_local_cache_process_200_blocks() {
-    launch_local_cache_process_n_block_batches("zcashd", 2).await;
 }
 
 /// Launches a testmanager and block cache and generates `n*100` blocks, checking blocks are stored and fetched correctly.
@@ -186,5 +146,54 @@ async fn launch_local_cache_process_n_block_batches(validator: &str, batches: u3
         dbg!(non_finalised_state_blocks.last());
         dbg!(finalised_state_blocks.first());
         dbg!(finalised_state_blocks.last());
+    }
+}
+
+mod zcashd {
+
+    use super::launch_local_cache_process_n_block_batches;
+
+    use super::launch_local_cache;
+
+    #[tokio::test]
+    pub(crate) async fn zcashd_local_cache_launch_no_db() {
+        launch_local_cache("zcashd", true).await;
+    }
+
+    #[tokio::test]
+    pub(crate) async fn zcashd_local_cache_launch_with_db() {
+        launch_local_cache("zcashd", false).await;
+    }
+
+    #[tokio::test]
+    pub(crate) async fn zcashd_local_cache_process_100_blocks() {
+        launch_local_cache_process_n_block_batches("zcashd", 1).await;
+    }
+
+    #[tokio::test]
+    pub(crate) async fn zcashd_local_cache_process_200_blocks() {
+        launch_local_cache_process_n_block_batches("zcashd", 2).await;
+    }
+}
+
+mod zebrad {
+
+    use super::launch_local_cache_process_n_block_batches;
+
+    use super::launch_local_cache;
+
+    #[tokio::test]
+    pub(crate) async fn zebrad_local_cache_launch_no_db() {
+        launch_local_cache("zebrad", true).await;
+    }
+
+    #[tokio::test]
+    pub(crate) async fn zebrad_local_cache_launch_with_db() {
+        launch_local_cache("zebrad", false).await;
+    }
+
+    #[tokio::test]
+    pub(crate) async fn zebrad_local_cache_process_200_blocks() {
+        launch_local_cache_process_n_block_batches("zebrad", 2).await;
     }
 }
