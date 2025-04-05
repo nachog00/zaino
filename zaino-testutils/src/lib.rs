@@ -560,6 +560,114 @@ mod launch_testmanager {
             dbg!(clients.recipient.do_info().await);
             test_manager.close().await;
         }
+
+        /// This test shows currently we do not receive mining rewards from Zebra unless we mine 100 blocks at a time.
+        /// This is not the case with Zcashd and should not be the case here.
+        /// Even if rewards need 100 confirmations these blocks should not have to be mined at the same time.
+        #[tokio::test]
+        async fn zebrad_zaino_clients_receive_mining_reward() {
+            let mut test_manager =
+                TestManager::launch("zebrad", None, None, true, true, true, true)
+                    .await
+                    .unwrap();
+            let clients = test_manager
+                .clients
+                .as_ref()
+                .expect("Clients are not initialized");
+
+            clients.faucet.do_sync(true).await.unwrap();
+            dbg!(clients.faucet.do_balance().await);
+
+            test_manager.local_net.generate_blocks(100).await.unwrap();
+            clients.faucet.do_sync(true).await.unwrap();
+            dbg!(clients.faucet.do_balance().await);
+
+            assert!(
+                clients.faucet.do_balance().await.orchard_balance.unwrap() > 0
+                    || clients.faucet.do_balance().await.transparent_balance.unwrap() > 0,
+                "No mining reward received from Zebrad. Faucet Orchard Balance: {:}. Faucet Transparent Balance: {:}.",
+                clients.faucet.do_balance().await.orchard_balance.unwrap(),
+                clients.faucet.do_balance().await.transparent_balance.unwrap()
+        );
+
+            test_manager.close().await;
+        }
+
+        #[tokio::test]
+        async fn zebrad_zaino_clients_receive_mining_reward_and_send() {
+            let mut test_manager =
+                TestManager::launch("zebrad", None, None, true, true, true, true)
+                    .await
+                    .unwrap();
+            let clients = test_manager
+                .clients
+                .as_ref()
+                .expect("Clients are not initialized");
+
+            test_manager.local_net.generate_blocks(100).await.unwrap();
+            tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+            clients.faucet.do_sync(true).await.unwrap();
+            dbg!(clients.faucet.do_balance().await);
+
+            assert!(
+                clients
+                    .faucet
+                    .do_balance()
+                    .await
+                    .transparent_balance
+                    .unwrap()
+                    > 0,
+                "No mining reward received from Zebrad. Faucet Transparent Balance: {:}.",
+                clients
+                    .faucet
+                    .do_balance()
+                    .await
+                    .transparent_balance
+                    .unwrap()
+            );
+
+            // *Send all transparent funds to own orchard address.
+            clients.faucet.quick_shield().await.unwrap();
+            test_manager.local_net.generate_blocks(1).await.unwrap();
+            tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+            clients.faucet.do_sync(true).await.unwrap();
+            dbg!(clients.faucet.do_balance().await);
+
+            assert!(
+            clients.faucet.do_balance().await.orchard_balance.unwrap() > 0,
+            "No funds received from shield. Faucet Orchard Balance: {:}. Faucet Transparent Balance: {:}.",
+            clients.faucet.do_balance().await.orchard_balance.unwrap(),
+            clients.faucet.do_balance().await.transparent_balance.unwrap()
+        );
+
+            zingolib::testutils::lightclient::from_inputs::quick_send(
+                &clients.faucet,
+                vec![(
+                    &clients.get_recipient_address("sapling").await,
+                    250_000,
+                    None,
+                )],
+            )
+            .await
+            .unwrap();
+
+            test_manager.local_net.generate_blocks(1).await.unwrap();
+            tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+            clients.recipient.do_sync(true).await.unwrap();
+            dbg!(clients.recipient.do_balance().await);
+
+            assert_eq!(
+                clients
+                    .recipient
+                    .do_balance()
+                    .await
+                    .verified_sapling_balance
+                    .unwrap(),
+                250_000
+            );
+
+            test_manager.close().await;
+        }
     }
 
     mod zcashd {}
@@ -650,37 +758,6 @@ mod launch_testmanager {
         test_manager.close().await;
     }
 
-    /// This test shows currently we do not receive mining rewards from Zebra unless we mine 100 blocks at a time.
-    /// This is not the case with Zcashd and should not be the case here.
-    /// Even if rewards need 100 confirmations these blocks should not have to be mined at the same time.
-    #[tokio::test]
-    async fn zebrad_zaino_clients_receive_mining_reward() {
-        let mut test_manager = TestManager::launch("zebrad", None, None, true, true, true, true)
-            .await
-            .unwrap();
-        let clients = test_manager
-            .clients
-            .as_ref()
-            .expect("Clients are not initialized");
-
-        clients.faucet.do_sync(true).await.unwrap();
-        dbg!(clients.faucet.do_balance().await);
-
-        test_manager.local_net.generate_blocks(100).await.unwrap();
-        clients.faucet.do_sync(true).await.unwrap();
-        dbg!(clients.faucet.do_balance().await);
-
-        assert!(
-                clients.faucet.do_balance().await.orchard_balance.unwrap() > 0
-                    || clients.faucet.do_balance().await.transparent_balance.unwrap() > 0,
-                "No mining reward received from Zebrad. Faucet Orchard Balance: {:}. Faucet Transparent Balance: {:}.",
-                clients.faucet.do_balance().await.orchard_balance.unwrap(),
-                clients.faucet.do_balance().await.transparent_balance.unwrap()
-        );
-
-        test_manager.close().await;
-    }
-
     #[tokio::test]
     async fn zcashd_zaino_clients_receive_mining_reward() {
         let mut test_manager = TestManager::launch("zcashd", None, None, true, true, true, true)
@@ -701,81 +778,6 @@ mod launch_testmanager {
                 clients.faucet.do_balance().await.orchard_balance.unwrap(),
                 clients.faucet.do_balance().await.transparent_balance.unwrap()
             );
-
-        test_manager.close().await;
-    }
-
-    #[tokio::test]
-    async fn zebrad_zaino_clients_receive_mining_reward_and_send() {
-        let mut test_manager = TestManager::launch("zebrad", None, None, true, true, true, true)
-            .await
-            .unwrap();
-        let clients = test_manager
-            .clients
-            .as_ref()
-            .expect("Clients are not initialized");
-
-        test_manager.local_net.generate_blocks(100).await.unwrap();
-        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
-        clients.faucet.do_sync(true).await.unwrap();
-        dbg!(clients.faucet.do_balance().await);
-
-        assert!(
-            clients
-                .faucet
-                .do_balance()
-                .await
-                .transparent_balance
-                .unwrap()
-                > 0,
-            "No mining reward received from Zebrad. Faucet Transparent Balance: {:}.",
-            clients
-                .faucet
-                .do_balance()
-                .await
-                .transparent_balance
-                .unwrap()
-        );
-
-        // *Send all transparent funds to own orchard address.
-        clients.faucet.quick_shield().await.unwrap();
-        test_manager.local_net.generate_blocks(1).await.unwrap();
-        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
-        clients.faucet.do_sync(true).await.unwrap();
-        dbg!(clients.faucet.do_balance().await);
-
-        assert!(
-            clients.faucet.do_balance().await.orchard_balance.unwrap() > 0,
-            "No funds received from shield. Faucet Orchard Balance: {:}. Faucet Transparent Balance: {:}.",
-            clients.faucet.do_balance().await.orchard_balance.unwrap(),
-            clients.faucet.do_balance().await.transparent_balance.unwrap()
-        );
-
-        zingolib::testutils::lightclient::from_inputs::quick_send(
-            &clients.faucet,
-            vec![(
-                &clients.get_recipient_address("sapling").await,
-                250_000,
-                None,
-            )],
-        )
-        .await
-        .unwrap();
-
-        test_manager.local_net.generate_blocks(1).await.unwrap();
-        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
-        clients.recipient.do_sync(true).await.unwrap();
-        dbg!(clients.recipient.do_balance().await);
-
-        assert_eq!(
-            clients
-                .recipient
-                .do_balance()
-                .await
-                .verified_sapling_balance
-                .unwrap(),
-            250_000
-        );
 
         test_manager.close().await;
     }
