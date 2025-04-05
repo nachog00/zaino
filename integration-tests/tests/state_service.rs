@@ -4,9 +4,9 @@ use zaino_state::{
     indexer::{ZcashIndexer, ZcashService as _},
     state::StateService,
 };
-use zaino_testutils::{TestManager, ZEBRAD_CHAIN_CACHE_DIR, ZEBRAD_TESTNET_CACHE_DIR};
+use zaino_testutils::{TestManager, ZEBRAD_TESTNET_CACHE_DIR};
 use zebra_chain::{parameters::Network, subtree::NoteCommitmentSubtreeIndex};
-use zebra_rpc::methods::{AddressStrings, GetAddressTxIdsRequest, GetInfo};
+use zebra_rpc::methods::{AddressStrings, GetAddressTxIdsRequest};
 use zingo_infra_testutils::services::{self, validator::Validator as _};
 
 async fn create_test_manager_and_services(
@@ -105,149 +105,165 @@ async fn create_test_manager_and_services(
     (test_manager, fetch_service, subscriber, state_service)
 }
 
-#[tokio::test]
-async fn state_service_check_info_regtest_no_cache_zebrad() {
-    state_service_check_info("zebrad", None, services::network::Network::Regtest).await;
-}
+mod check_info {
 
-#[tokio::test]
-async fn state_service_check_info_regtest_with_cache_zebrad() {
-    state_service_check_info(
-        "zebrad",
-        ZEBRAD_CHAIN_CACHE_DIR.clone(),
-        services::network::Network::Regtest,
-    )
-    .await;
-}
+    use super::*;
 
-#[tokio::test]
-async fn state_service_check_info_testnet_zebrad() {
-    state_service_check_info(
-        "zebrad",
-        ZEBRAD_TESTNET_CACHE_DIR.clone(),
-        services::network::Network::Testnet,
-    )
-    .await;
-}
+    use zebra_rpc::methods::GetInfo;
+    use zingo_infra_testutils::services;
 
-async fn state_service_check_info(
-    validator: &str,
-    chain_cache: Option<std::path::PathBuf>,
-    network: services::network::Network,
-) {
-    let (mut test_manager, _fetch_service, fetch_service_subscriber, state_service) =
-        create_test_manager_and_services(validator, chain_cache, false, false, Some(network)).await;
+    use super::create_test_manager_and_services;
 
-    if dbg!(network.to_string()) == *"Regtest" {
-        test_manager.local_net.generate_blocks(1).await.unwrap();
-        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+    use zaino_testutils::ZEBRAD_TESTNET_CACHE_DIR;
+
+    use zaino_testutils::ZEBRAD_CHAIN_CACHE_DIR;
+
+    #[tokio::test]
+    pub(crate) async fn regtest_no_cache_zebrad() {
+        state_service_check_info("zebrad", None, services::network::Network::Regtest).await;
     }
 
-    let fetch_service_info = dbg!(fetch_service_subscriber.get_info().await.unwrap());
-    let fetch_service_blockchain_info = dbg!(fetch_service_subscriber
-        .get_blockchain_info()
-        .await
-        .unwrap());
+    #[tokio::test]
+    pub(crate) async fn regtest_with_cache_zebrad() {
+        state_service_check_info(
+            "zebrad",
+            ZEBRAD_CHAIN_CACHE_DIR.clone(),
+            services::network::Network::Regtest,
+        )
+        .await;
+    }
 
-    let state_service_info = dbg!(state_service.get_info().await.unwrap());
-    let state_service_blockchain_info = dbg!(state_service.get_blockchain_info().await.unwrap());
+    #[tokio::test]
+    pub(crate) async fn testnet_zebrad() {
+        state_service_check_info(
+            "zebrad",
+            ZEBRAD_TESTNET_CACHE_DIR.clone(),
+            services::network::Network::Testnet,
+        )
+        .await;
+    }
 
-    // Clean timestamp from get_info
-    let (
-        version,
-        build,
-        subversion,
-        protocol_version,
-        blocks,
-        connections,
-        proxy,
-        difficulty,
-        testnet,
-        pay_tx_fee,
-        relay_fee,
-        errors,
-        _,
-    ) = fetch_service_info.into_parts();
-    let cleaned_fetch_info = GetInfo::from_parts(
-        version,
-        build,
-        subversion,
-        protocol_version,
-        blocks,
-        connections,
-        proxy,
-        difficulty,
-        testnet,
-        pay_tx_fee,
-        relay_fee,
-        errors,
-        String::new(),
-    );
+    pub(crate) async fn state_service_check_info(
+        validator: &str,
+        chain_cache: Option<std::path::PathBuf>,
+        network: services::network::Network,
+    ) {
+        let (mut test_manager, _fetch_service, fetch_service_subscriber, state_service) =
+            create_test_manager_and_services(validator, chain_cache, false, false, Some(network))
+                .await;
 
-    let (
-        version,
-        build,
-        subversion,
-        protocol_version,
-        blocks,
-        connections,
-        proxy,
-        difficulty,
-        testnet,
-        pay_tx_fee,
-        relay_fee,
-        errors,
-        _,
-    ) = state_service_info.into_parts();
-    let cleaned_state_info = GetInfo::from_parts(
-        version,
-        build,
-        subversion,
-        protocol_version,
-        blocks,
-        connections,
-        proxy,
-        difficulty,
-        testnet,
-        pay_tx_fee,
-        relay_fee,
-        errors,
-        String::new(),
-    );
+        if dbg!(network.to_string()) == *"Regtest" {
+            test_manager.local_net.generate_blocks(1).await.unwrap();
+            tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+        }
 
-    assert_eq!(cleaned_fetch_info, cleaned_state_info);
+        let fetch_service_info = dbg!(fetch_service_subscriber.get_info().await.unwrap());
+        let fetch_service_blockchain_info = dbg!(fetch_service_subscriber
+            .get_blockchain_info()
+            .await
+            .unwrap());
 
-    assert_eq!(
-        fetch_service_blockchain_info.chain(),
-        state_service_blockchain_info.chain()
-    );
-    assert_eq!(
-        fetch_service_blockchain_info.blocks(),
-        state_service_blockchain_info.blocks()
-    );
-    assert_eq!(
-        fetch_service_blockchain_info.best_block_hash(),
-        state_service_blockchain_info.best_block_hash()
-    );
-    assert_eq!(
-        fetch_service_blockchain_info.estimated_height(),
-        state_service_blockchain_info.estimated_height()
-    );
-    // TODO: Fix this! (ignored due to [https://github.com/zingolabs/zaino/issues/235]).
-    // assert_eq!(
-    //     fetch_service_blockchain_info.value_pools(),
-    //     state_service_blockchain_info.value_pools()
-    // );
-    assert_eq!(
-        fetch_service_blockchain_info.upgrades(),
-        state_service_blockchain_info.upgrades()
-    );
-    assert_eq!(
-        fetch_service_blockchain_info.consensus(),
-        state_service_blockchain_info.consensus()
-    );
+        let state_service_info = dbg!(state_service.get_info().await.unwrap());
+        let state_service_blockchain_info =
+            dbg!(state_service.get_blockchain_info().await.unwrap());
 
-    test_manager.close().await;
+        // Clean timestamp from get_info
+        let (
+            version,
+            build,
+            subversion,
+            protocol_version,
+            blocks,
+            connections,
+            proxy,
+            difficulty,
+            testnet,
+            pay_tx_fee,
+            relay_fee,
+            errors,
+            _,
+        ) = fetch_service_info.into_parts();
+        let cleaned_fetch_info = GetInfo::from_parts(
+            version,
+            build,
+            subversion,
+            protocol_version,
+            blocks,
+            connections,
+            proxy,
+            difficulty,
+            testnet,
+            pay_tx_fee,
+            relay_fee,
+            errors,
+            String::new(),
+        );
+
+        let (
+            version,
+            build,
+            subversion,
+            protocol_version,
+            blocks,
+            connections,
+            proxy,
+            difficulty,
+            testnet,
+            pay_tx_fee,
+            relay_fee,
+            errors,
+            _,
+        ) = state_service_info.into_parts();
+        let cleaned_state_info = GetInfo::from_parts(
+            version,
+            build,
+            subversion,
+            protocol_version,
+            blocks,
+            connections,
+            proxy,
+            difficulty,
+            testnet,
+            pay_tx_fee,
+            relay_fee,
+            errors,
+            String::new(),
+        );
+
+        assert_eq!(cleaned_fetch_info, cleaned_state_info);
+
+        assert_eq!(
+            fetch_service_blockchain_info.chain(),
+            state_service_blockchain_info.chain()
+        );
+        assert_eq!(
+            fetch_service_blockchain_info.blocks(),
+            state_service_blockchain_info.blocks()
+        );
+        assert_eq!(
+            fetch_service_blockchain_info.best_block_hash(),
+            state_service_blockchain_info.best_block_hash()
+        );
+        assert_eq!(
+            fetch_service_blockchain_info.estimated_height(),
+            state_service_blockchain_info.estimated_height()
+        );
+        // TODO: Fix this! (ignored due to [https://github.com/zingolabs/zaino/issues/235]).
+        // assert_eq!(
+        //     fetch_service_blockchain_info.value_pools(),
+        //     state_service_blockchain_info.value_pools()
+        // );
+        assert_eq!(
+            fetch_service_blockchain_info.upgrades(),
+            state_service_blockchain_info.upgrades()
+        );
+        assert_eq!(
+            fetch_service_blockchain_info.consensus(),
+            state_service_blockchain_info.consensus()
+        );
+
+        test_manager.close().await;
+    }
 }
 
 #[ignore = "currently fails due to error in TrustedChainSync [https://github.com/zingolabs/zaino/issues/231]."]
