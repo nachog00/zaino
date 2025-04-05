@@ -442,7 +442,7 @@ impl Drop for TestManager {
 }
 
 #[cfg(test)]
-mod tests {
+mod launch_testmanager {
     use super::*;
 
     #[tokio::test]
