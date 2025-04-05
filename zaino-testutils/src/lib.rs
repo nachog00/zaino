@@ -446,7 +446,7 @@ mod launch_testmanager {
     use super::*;
 
     #[tokio::test]
-    async fn launch_testmanager_zebrad() {
+    async fn zebrad() {
         let mut test_manager = TestManager::launch("zebrad", None, None, false, true, true, false)
             .await
             .unwrap();
@@ -458,7 +458,7 @@ mod launch_testmanager {
     }
 
     #[tokio::test]
-    async fn launch_testmanager_zcashd() {
+    async fn zcashd() {
         let mut test_manager = TestManager::launch("zcashd", None, None, false, true, true, false)
             .await
             .unwrap();
@@ -470,7 +470,7 @@ mod launch_testmanager {
     }
 
     #[tokio::test]
-    async fn launch_testmanager_zebrad_generate_blocks() {
+    async fn zebrad_generate_blocks() {
         let mut test_manager = TestManager::launch("zebrad", None, None, false, true, true, false)
             .await
             .unwrap();
@@ -487,7 +487,7 @@ mod launch_testmanager {
     }
 
     #[tokio::test]
-    async fn launch_testmanager_zcashd_generate_blocks() {
+    async fn zcashd_generate_blocks() {
         let mut test_manager = TestManager::launch("zcashd", None, None, false, true, true, false)
             .await
             .unwrap();
@@ -504,7 +504,7 @@ mod launch_testmanager {
     }
 
     #[tokio::test]
-    async fn launch_testmanager_zebrad_with_chain() {
+    async fn zebrad_with_chain() {
         let mut test_manager = TestManager::launch(
             "zebrad",
             None,
@@ -524,7 +524,7 @@ mod launch_testmanager {
     }
 
     #[tokio::test]
-    async fn launch_testmanager_zcashd_with_chain() {
+    async fn zcashd_with_chain() {
         let mut test_manager = TestManager::launch(
             "zcashd",
             None,
@@ -544,7 +544,7 @@ mod launch_testmanager {
     }
 
     #[tokio::test]
-    async fn launch_testmanager_zebrad_zaino() {
+    async fn zebrad_zaino() {
         let mut test_manager = TestManager::launch("zebrad", None, None, true, true, true, false)
             .await
             .unwrap();
@@ -567,7 +567,7 @@ mod launch_testmanager {
     }
 
     #[tokio::test]
-    async fn launch_testmanager_zcashd_zaino() {
+    async fn zcashd_zaino() {
         let mut test_manager = TestManager::launch("zcashd", None, None, true, true, true, false)
             .await
             .unwrap();
@@ -590,7 +590,7 @@ mod launch_testmanager {
     }
 
     #[tokio::test]
-    async fn launch_testmanager_zebrad_zaino_clients() {
+    async fn zebrad_zaino_clients() {
         let mut test_manager = TestManager::launch("zebrad", None, None, true, true, true, true)
             .await
             .unwrap();
@@ -604,7 +604,7 @@ mod launch_testmanager {
     }
 
     #[tokio::test]
-    async fn launch_testmanager_zcashd_zaino_clients() {
+    async fn zcashd_zaino_clients() {
         let mut test_manager = TestManager::launch("zcashd", None, None, true, true, true, true)
             .await
             .unwrap();
@@ -621,7 +621,7 @@ mod launch_testmanager {
     /// This is not the case with Zcashd and should not be the case here.
     /// Even if rewards need 100 confirmations these blocks should not have to be mined at the same time.
     #[tokio::test]
-    async fn launch_testmanager_zebrad_zaino_clients_receive_mining_reward() {
+    async fn zebrad_zaino_clients_receive_mining_reward() {
         let mut test_manager = TestManager::launch("zebrad", None, None, true, true, true, true)
             .await
             .unwrap();
@@ -649,7 +649,7 @@ mod launch_testmanager {
     }
 
     #[tokio::test]
-    async fn launch_testmanager_zcashd_zaino_clients_receive_mining_reward() {
+    async fn zcashd_zaino_clients_receive_mining_reward() {
         let mut test_manager = TestManager::launch("zcashd", None, None, true, true, true, true)
             .await
             .unwrap();
@@ -673,7 +673,7 @@ mod launch_testmanager {
     }
 
     #[tokio::test]
-    async fn launch_testmanager_zebrad_zaino_clients_receive_mining_reward_and_send() {
+    async fn zebrad_zaino_clients_receive_mining_reward_and_send() {
         let mut test_manager = TestManager::launch("zebrad", None, None, true, true, true, true)
             .await
             .unwrap();
@@ -748,7 +748,7 @@ mod launch_testmanager {
     }
 
     #[tokio::test]
-    async fn launch_testmanager_zcashd_zaino_clients_receive_mining_reward_and_send() {
+    async fn zcashd_zaino_clients_receive_mining_reward_and_send() {
         let mut test_manager = TestManager::launch("zcashd", None, None, true, true, true, true)
             .await
             .unwrap();
@@ -807,7 +807,7 @@ mod launch_testmanager {
     }
 
     #[tokio::test]
-    async fn launch_testmanager_zebrad_zaino_testnet() {
+    async fn zebrad_zaino_testnet() {
         let mut test_manager = TestManager::launch(
             "zebrad",
             Some(services::network::Network::Testnet),
