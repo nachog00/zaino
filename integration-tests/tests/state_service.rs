@@ -276,12 +276,12 @@ mod get {
 
     #[ignore = "currently fails due to error in TrustedChainSync [https://github.com/zingolabs/zaino/issues/231]."]
     #[tokio::test]
-    pub(crate) async fn state_service_get_address_balance_regtest_zebrad() {
+    pub(crate) async fn address_balance_regtest_zebrad() {
         state_service_get_address_balance("zebrad").await;
     }
 
     #[tokio::test]
-    pub(crate) async fn state_service_get_address_balance_testnet_zebrad() {
+    pub(crate) async fn address_balance_testnet_zebrad() {
         state_service_get_address_balance_testnet().await;
     }
 
@@ -376,12 +376,12 @@ mod get {
     }
 
     #[tokio::test]
-    pub(crate) async fn state_service_get_block_raw_regtest_zebrad() {
+    pub(crate) async fn block_raw_regtest_zebrad() {
         state_service_get_block_raw("zebrad", None, services::network::Network::Regtest).await;
     }
 
     #[tokio::test]
-    pub(crate) async fn state_service_get_block_raw_testnet_zebrad() {
+    pub(crate) async fn block_raw_testnet_zebrad() {
         state_service_get_block_raw(
             "zebrad",
             ZEBRAD_TESTNET_CACHE_DIR.clone(),
@@ -417,12 +417,12 @@ mod get {
     }
 
     #[tokio::test]
-    pub(crate) async fn state_service_get_block_object_regtest_zebrad() {
+    pub(crate) async fn block_object_regtest_zebrad() {
         state_service_get_block_object("zebrad", None, services::network::Network::Regtest).await;
     }
 
     #[tokio::test]
-    pub(crate) async fn state_service_get_block_object_testnet_zebrad() {
+    pub(crate) async fn block_object_testnet_zebrad() {
         state_service_get_block_object(
             "zebrad",
             ZEBRAD_TESTNET_CACHE_DIR.clone(),
@@ -459,12 +459,12 @@ mod get {
 
     #[ignore = "currently fails due to error in TrustedChainSync [https://github.com/zingolabs/zaino/issues/231]."]
     #[tokio::test]
-    pub(crate) async fn state_service_get_raw_mempool_regtest_zebrad() {
+    pub(crate) async fn raw_mempool_regtest_zebrad() {
         state_service_get_raw_mempool("zebrad").await;
     }
 
     #[tokio::test]
-    pub(crate) async fn state_service_get_raw_mempool_testnet_zebrad() {
+    pub(crate) async fn raw_mempool_testnet_zebrad() {
         state_service_get_raw_mempool_testnet().await;
     }
 
@@ -559,12 +559,12 @@ mod get {
 
     #[ignore = "currently fails due to error in TrustedChainSync [https://github.com/zingolabs/zaino/issues/231]."]
     #[tokio::test]
-    pub(crate) async fn state_service_z_get_treestate_regtest_zebrad() {
+    pub(crate) async fn z_get_treestate_regtest_zebrad() {
         state_service_z_get_treestate("zebrad").await;
     }
 
     #[tokio::test]
-    pub(crate) async fn state_service_z_get_treestate_testnet_zebrad() {
+    pub(crate) async fn z_get_treestate_testnet_zebrad() {
         state_service_z_get_treestate_testnet().await;
     }
 
@@ -646,12 +646,12 @@ mod get {
 
     #[ignore = "currently fails due to error in TrustedChainSync [https://github.com/zingolabs/zaino/issues/231]."]
     #[tokio::test]
-    pub(crate) async fn state_service_z_get_subtrees_by_index_regtest_zebrad() {
+    pub(crate) async fn z_get_subtrees_by_index_regtest_zebrad() {
         state_service_z_get_subtrees_by_index("zebrad").await;
     }
 
     #[tokio::test]
-    pub(crate) async fn state_service_z_get_subtrees_by_index_testnet_zebrad() {
+    pub(crate) async fn z_get_subtrees_by_index_testnet_zebrad() {
         state_service_z_get_subtrees_by_index_testnet().await;
     }
 
@@ -759,12 +759,12 @@ mod get {
 
     #[ignore = "currently fails due to error in TrustedChainSync [https://github.com/zingolabs/zaino/issues/231]."]
     #[tokio::test]
-    pub(crate) async fn state_service_get_raw_transaction_regtest_zebrad() {
+    pub(crate) async fn raw_transaction_regtest_zebrad() {
         state_service_get_raw_transaction("zebrad").await;
     }
 
     #[tokio::test]
-    pub(crate) async fn state_service_get_raw_transaction_testnet_zebrad() {
+    pub(crate) async fn raw_transaction_testnet_zebrad() {
         state_service_get_raw_transaction_testnet().await;
     }
 
@@ -850,12 +850,12 @@ mod get {
 
     #[ignore = "currently fails due to error in TrustedChainSync [https://github.com/zingolabs/zaino/issues/231]."]
     #[tokio::test]
-    pub(crate) async fn state_service_get_address_tx_ids_regtest_zebrad() {
+    pub(crate) async fn address_tx_ids_regtest_zebrad() {
         state_service_get_address_tx_ids("zebrad").await;
     }
 
     #[tokio::test]
-    pub(crate) async fn state_service_get_address_tx_ids_testnet_zebrad() {
+    pub(crate) async fn address_tx_ids_testnet_zebrad() {
         state_service_get_address_tx_ids_testnet().await;
     }
 
@@ -959,12 +959,12 @@ mod get {
 
     #[ignore = "currently fails due to error in TrustedChainSync [https://github.com/zingolabs/zaino/issues/231]."]
     #[tokio::test]
-    pub(crate) async fn state_service_get_address_utxos_zebrad() {
+    pub(crate) async fn address_utxos_zebrad() {
         state_service_get_address_utxos("zebrad").await;
     }
 
     #[tokio::test]
-    pub(crate) async fn state_service_get_address_utxos_testnet_zebrad() {
+    pub(crate) async fn address_utxos_testnet_zebrad() {
         state_service_get_address_utxos_testnet().await;
     }
 
