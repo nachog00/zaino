@@ -1,4 +1,3 @@
-use core::panic;
 use zaino_fetch::jsonrpsee::connector::{test_node_and_return_url, JsonRpSeeConnector};
 use zaino_state::{
     config::BlockCacheConfig,
@@ -7,7 +6,10 @@ use zaino_state::{
 use zaino_testutils::{TestManager, ValidatorKind};
 use zebra_chain::block::Height;
 use zebra_state::HashOrHeight;
-use zingo_infra_testutils::services::validator::Validator as _;
+use zingo_infra_testutils::services::{
+    network::Network::{Mainnet, Regtest, Testnet},
+    validator::Validator as _,
+};
 
 async fn create_test_manager_and_block_cache(
     validator: &ValidatorKind,
@@ -49,11 +51,10 @@ async fn create_test_manager_and_block_cache(
     )
     .unwrap();
 
-    let network = match test_manager.network.to_string().as_str() {
-        "Regtest" => zebra_chain::parameters::Network::new_regtest(Some(1), Some(1)),
-        "Testnet" => zebra_chain::parameters::Network::new_default_testnet(),
-        "Mainnet" => zebra_chain::parameters::Network::Mainnet,
-        _ => panic!("Incorrect newtork type found."),
+    let network = match test_manager.network {
+        Regtest => zebra_chain::parameters::Network::new_regtest(Some(1), Some(1)),
+        Testnet => zebra_chain::parameters::Network::new_default_testnet(),
+        Mainnet => zebra_chain::parameters::Network::Mainnet,
     };
 
     let block_cache_config = BlockCacheConfig {
