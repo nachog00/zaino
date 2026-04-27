@@ -10,14 +10,12 @@
 //! they reach knope.
 
 use std::collections::BTreeSet;
-use std::fmt;
 use std::fs;
 use std::path::{Path, PathBuf};
 
 use clap::Subcommand;
-use console::style;
 
-use crate::workspace;
+use crate::{log, workspace};
 
 const VALID_BUMPS: &[&str] = &["major", "minor", "patch"];
 
@@ -35,21 +33,17 @@ pub(crate) fn run(action: Action, root: &Path) -> Result<(), String> {
             if errors.is_empty() {
                 let count = changeset_files(root)?.len();
                 if count == 0 {
-                    println!("{}", style("No changeset files to validate.").dim());
+                    log::info("No changeset files to validate.");
                 } else {
-                    println!(
-                        "{} Validated {count} changeset file(s).",
-                        style("ok").green().bold()
-                    );
+                    log::ok(&format!("Validated {count} changeset file(s)."));
                 }
                 Ok(())
             } else {
                 for e in &errors {
-                    eprintln!("{e}");
+                    log::file_error(&e.file, e.line, &e.message);
                 }
                 Err(format!(
-                    "{} Changeset validation failed with {} error(s).",
-                    style("error").red().bold(),
+                    "Changeset validation failed with {} error(s).",
                     errors.len()
                 ))
             }
@@ -66,22 +60,6 @@ struct ValidationError {
     file: String,
     line: Option<usize>,
     message: String,
-}
-
-impl fmt::Display for ValidationError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let location = match self.line {
-            Some(n) => format!("{}:{}", self.file, n),
-            None => self.file.clone(),
-        };
-        write!(
-            f,
-            "  {} {}: {}",
-            style("error").red().bold(),
-            style(location).cyan(),
-            self.message
-        )
-    }
 }
 
 fn validate(root: &Path, valid_crates: &BTreeSet<String>) -> Vec<ValidationError> {
