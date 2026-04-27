@@ -7,6 +7,15 @@ members = [
     "packages/zaino-state",
     "packages/zaino-fetch",
     "packages/zaino-proto",
+    "tools/xtask",
+]
+default-members = [
+    "packages/zaino-common",
+    "packages/zainod",
+    "packages/zaino-serve",
+    "packages/zaino-state",
+    "packages/zaino-fetch",
+    "packages/zaino-proto",
 ]
 exclude = [
     "integration-tests",

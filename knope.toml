@@ -1,0 +1,40 @@
+[packages.zaino-common]
+versioned_files = ["packages/zaino-common/Cargo.toml"]
+changelog = "packages/zaino-common/CHANGELOG.md"
+
+[packages.zaino-fetch]
+versioned_files = ["packages/zaino-fetch/Cargo.toml"]
+changelog = "packages/zaino-fetch/CHANGELOG.md"
+
+[packages.zaino-proto]
+versioned_files = ["packages/zaino-proto/Cargo.toml"]
+changelog = "packages/zaino-proto/CHANGELOG.md"
+
+[packages.zaino-serve]
+versioned_files = ["packages/zaino-serve/Cargo.toml"]
+changelog = "packages/zaino-serve/CHANGELOG.md"
+
+[packages.zaino-state]
+versioned_files = ["packages/zaino-state/Cargo.toml"]
+changelog = "packages/zaino-state/CHANGELOG.md"
+
+[packages.zainod]
+versioned_files = ["packages/zainod/Cargo.toml"]
+changelog = "packages/zainod/CHANGELOG.md"
+
+[github]
+owner = "zingolabs"
+repo = "zaino"
+
+[[workflows]]
+name = "prepare-release"
+
+[[workflows.steps]]
+type = "PrepareRelease"
+ignore_conventional_commits = true
+
+[[workflows]]
+name = "release"
+
+[[workflows.steps]]
+type = "Release"

@@ -63,7 +63,7 @@ script = [
 
 [tasks.lint]
 description = "Run all lints. Use as a pre-commit hook."
-dependencies = ["fmt", "clippy", "doc", "lint-boundary-conversions"]
+dependencies = ["fmt", "clippy", "doc", "lint-boundary-conversions", "changeset-validate"]
 
 [tasks.toggle-hooks]
 description = "Toggles the git config for core.hooksPath"

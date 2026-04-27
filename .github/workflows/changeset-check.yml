@@ -1,0 +1,60 @@
+name: Changeset Check
+
+on:
+  pull_request:
+    branches: [dev]
+
+jobs:
+  check:
+    name: Check for changeset
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Check for changeset
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          CHANGED_FILES=$(gh pr diff ${{ github.event.pull_request.number }} --name-only)
+
+          # Check if any publishable crate source changed
+          SRC_CHANGED=$(echo "$CHANGED_FILES" | grep -E '^packages/' || true)
+
+          if [ -n "$SRC_CHANGED" ]; then
+            CHANGESET=$(echo "$CHANGED_FILES" | grep -E '^\.changeset/.*\.md$' || true)
+
+            if [ -z "$CHANGESET" ]; then
+              echo "::error::Publishable crate source changed but no changeset found."
+              echo ""
+              echo "Changed source files:"
+              echo "$SRC_CHANGED"
+              echo ""
+              echo "Add a changeset file in .changeset/ with YAML frontmatter:"
+              echo ""
+              echo "  ---"
+              echo "  zaino-state: minor"
+              echo "  ---"
+              echo ""
+              echo "  Description of the change for the changelog."
+              echo ""
+              echo "Or add the 'skip-changeset' label to bypass this check."
+              exit 1
+            else
+              echo "Changeset found: $CHANGESET"
+            fi
+          else
+            echo "No publishable crate changes, changeset not required."
+          fi
+
+      - name: Check skip label
+        if: failure()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          LABELS=$(gh pr view ${{ github.event.pull_request.number }} --json labels --jq '.labels[].name')
+          if echo "$LABELS" | grep -q '^skip-changeset$'; then
+            echo "skip-changeset label found, allowing."
+            exit 0
+          fi
