@@ -6,6 +6,7 @@ publish = false
 
 [dependencies]
 clap = { version = "4", features = ["derive"] }
+console = "0.15"
 semver = "1"
 toml = "0.8"
 serde = { version = "1", features = ["derive"] }

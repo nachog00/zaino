@@ -15,6 +15,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use clap::Subcommand;
+use console::style;
 
 use crate::workspace;
 
@@ -24,8 +25,6 @@ const VALID_BUMPS: &[&str] = &["major", "minor", "patch"];
 pub(crate) enum Action {
     /// Validate all .changeset/*.md files.
     Validate,
-    /// Create a new changeset from the current branch name.
-    New,
 }
 
 pub(crate) fn run(action: Action, root: &Path) -> Result<(), String> {
@@ -36,9 +35,12 @@ pub(crate) fn run(action: Action, root: &Path) -> Result<(), String> {
             if errors.is_empty() {
                 let count = changeset_files(root)?.len();
                 if count == 0 {
-                    println!("No changeset files to validate.");
+                    println!("{}", style("No changeset files to validate.").dim());
                 } else {
-                    println!("Validated {count} changeset file(s). All valid.");
+                    println!(
+                        "{} Validated {count} changeset file(s).",
+                        style("ok").green().bold()
+                    );
                 }
                 Ok(())
             } else {
@@ -46,12 +48,12 @@ pub(crate) fn run(action: Action, root: &Path) -> Result<(), String> {
                     eprintln!("{e}");
                 }
                 Err(format!(
-                    "Changeset validation failed with {} error(s).",
+                    "{} Changeset validation failed with {} error(s).",
+                    style("error").red().bold(),
                     errors.len()
                 ))
             }
         }
-        Action::New => new_changeset(root),
     }
 }
 
@@ -68,10 +70,17 @@ struct ValidationError {
 
 impl fmt::Display for ValidationError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self.line {
-            Some(n) => write!(f, "  ERROR ({}:{}): {}", self.file, n, self.message),
-            None => write!(f, "  ERROR ({}): {}", self.file, self.message),
-        }
+        let location = match self.line {
+            Some(n) => format!("{}:{}", self.file, n),
+            None => self.file.clone(),
+        };
+        write!(
+            f,
+            "  {} {}: {}",
+            style("error").red().bold(),
+            style(location).cyan(),
+            self.message
+        )
     }
 }
 
@@ -224,60 +233,6 @@ fn split_frontmatter(content: &str) -> Option<(&str, &str)> {
     let body = after_closing.strip_prefix('\n').unwrap_or(after_closing);
 
     Some((frontmatter, body))
-}
-
-// ---------------------------------------------------------------------------
-// new changeset helper
-// ---------------------------------------------------------------------------
-
-fn new_changeset(root: &Path) -> Result<(), String> {
-    let branch = current_branch()?;
-    let slug = branch
-        .replace('/', "-")
-        .replace(|c: char| !c.is_ascii_alphanumeric() && c != '-' && c != '_', "-");
-
-    let dir = root.join(".changeset");
-    let file = dir.join(format!("{slug}.md"));
-
-    if file.exists() {
-        return Err(format!(
-            "Changeset already exists: {}\nEdit it directly or remove it first.",
-            file.display()
-        ));
-    }
-
-    let packages = workspace::knope_packages(root)?;
-
-    fs::create_dir_all(&dir).map_err(|e| format!("cannot create .changeset/: {e}"))?;
-    fs::write(&file, "---\n---\n\n")
-        .map_err(|e| format!("cannot write {}: {e}", file.display()))?;
-
-    println!("Created {}", file.display());
-    println!();
-    println!("Edit the file to add affected crates and a changelog description:");
-    println!();
-    println!("  ---");
-    println!("  zaino-state: minor");
-    println!("  ---");
-    println!();
-    println!("  Description of the change.");
-    println!();
-    println!("Valid crates: {}", packages.iter().cloned().collect::<Vec<_>>().join(", "));
-    println!("Valid bumps:  {}", VALID_BUMPS.join(", "));
-    Ok(())
-}
-
-fn current_branch() -> Result<String, String> {
-    let output = std::process::Command::new("git")
-        .args(["rev-parse", "--abbrev-ref", "HEAD"])
-        .output()
-        .map_err(|e| format!("cannot run git: {e}"))?;
-
-    if !output.status.success() {
-        return Err("git rev-parse failed".into());
-    }
-
-    Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
 }
 
 // ---------------------------------------------------------------------------

@@ -59,7 +59,7 @@ echo "  doc                        Build docs (no deps, all features, document p
 echo "  toggle-hooks               Toggle the git config for core.hooksPath to use .githooks/"
 echo ""
 echo "Release commands:"
-echo "  changeset-new              Create a new changeset file from the current branch name"
+echo "  changeset-new              Create a new changeset file (interactive, via knope)"
 echo "  changeset-validate         Validate all .changeset/*.md files"
 echo ""
 echo "Build speed:"

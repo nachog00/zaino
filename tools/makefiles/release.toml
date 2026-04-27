@@ -4,6 +4,6 @@ command = "cargo"
 args = ["run", "--package", "xtask", "--", "versioning", "changeset", "validate"]
 
 [tasks.changeset-new]
-description = "Create a new changeset file from the current branch name"
-command = "cargo"
-args = ["run", "--package", "xtask", "--", "versioning", "changeset", "new"]
+description = "Create a new changeset file (delegates to knope)"
+command = "knope"
+args = ["document-change"]
