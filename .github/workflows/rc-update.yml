@@ -1,0 +1,40 @@
+name: RC Update
+
+on:
+  workflow_run:
+    workflows: [CI - Nightly]
+    types: [completed]
+    branches: [dev]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: rc-update
+  cancel-in-progress: true
+
+jobs:
+  advance-rc:
+    name: Advance RC
+    runs-on: ubuntu-latest
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: knope-dev/action@v2.1.2
+
+      - name: Configure git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Advance RC
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          cargo run --package xtask -- versioning advance-rc \
+            --green-commit ${{ github.event.workflow_run.head_sha }}

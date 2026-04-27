@@ -1,0 +1,49 @@
+name: RC Pull Request
+
+on:
+  workflow_run:
+    workflows: [RC Update]
+    types: [completed]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  create-pr:
+    name: Create/Update PR to stable
+    runs-on: ubuntu-latest
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: rc
+          fetch-depth: 0
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Check if stable exists
+        id: check-stable
+        run: |
+          if git ls-remote --heads origin stable | grep -q stable; then
+            echo "exists=true" >> $GITHUB_OUTPUT
+          else
+            echo "exists=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Create or update PR
+        if: steps.check-stable.outputs.exists == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          BODY=$(cargo run --package xtask -- versioning release-pr-body)
+
+          EXISTING_PR=$(gh pr list --base stable --head rc --json number --jq '.[0].number' 2>/dev/null || echo "")
+
+          if [ -n "$EXISTING_PR" ]; then
+            gh pr edit "$EXISTING_PR" --body "$BODY"
+          else
+            gh pr create --base stable --head rc \
+              --title "Release" \
+              --body "$BODY"
+          fi

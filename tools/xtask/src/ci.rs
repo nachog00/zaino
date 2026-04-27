@@ -1,0 +1,159 @@
+//! Dry-run-aware helpers for CI operations.
+//!
+//! These functions shell out to git, knope, and gh. When `dry_run` is
+//! true they log what they *would* do without executing side effects.
+
+use std::process::Command;
+
+use crate::log;
+
+/// Run a command, streaming output. Returns the exit status.
+fn exec(cmd: &mut Command, dry_run: bool) -> Result<(), String> {
+    let program = cmd.get_program().to_string_lossy().to_string();
+    let args: Vec<_> = cmd.get_args().map(|a| a.to_string_lossy().to_string()).collect();
+    let display = format!("{program} {}", args.join(" "));
+
+    if dry_run {
+        log::info(&format!("[dry-run] would run: {display}"));
+        return Ok(());
+    }
+
+    log::info(&format!("running: {display}"));
+    let status = cmd
+        .status()
+        .map_err(|e| format!("failed to run `{program}`: {e}"))?;
+
+    if status.success() {
+        Ok(())
+    } else {
+        Err(format!("`{display}` exited with {status}"))
+    }
+}
+
+/// Run a command and capture stdout. Not affected by dry_run -- used for
+/// queries that don't mutate state (e.g. git rev-parse, git merge-base).
+fn query(cmd: &mut Command) -> Result<String, String> {
+    let program = cmd.get_program().to_string_lossy().to_string();
+    let output = cmd
+        .output()
+        .map_err(|e| format!("failed to run `{program}`: {e}"))?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(format!("`{program}` failed: {stderr}"));
+    }
+
+    Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
+}
+
+// ---------------------------------------------------------------------------
+// git
+// ---------------------------------------------------------------------------
+
+/// Configure git user for CI commits.
+pub(crate) fn git_configure(dry_run: bool) -> Result<(), String> {
+    exec(
+        Command::new("git").args(["config", "user.name", "github-actions[bot]"]),
+        dry_run,
+    )?;
+    exec(
+        Command::new("git").args(["config", "user.email", "github-actions[bot]@users.noreply.github.com"]),
+        dry_run,
+    )
+}
+
+/// Check if `ancestor` is an ancestor of `branch`.
+pub(crate) fn git_is_ancestor(ancestor: &str, branch: &str) -> Result<bool, String> {
+    let status = Command::new("git")
+        .args(["merge-base", "--is-ancestor", ancestor, branch])
+        .status()
+        .map_err(|e| format!("git merge-base failed: {e}"))?;
+    Ok(status.success())
+}
+
+/// Get the SHA of a ref.
+pub(crate) fn git_rev_parse(refspec: &str) -> Result<String, String> {
+    query(Command::new("git").args(["rev-parse", refspec]))
+}
+
+/// Check if a remote branch exists.
+pub(crate) fn git_remote_branch_exists(branch: &str) -> Result<bool, String> {
+    let result = Command::new("git")
+        .args(["show-ref", "--verify", "--quiet", &format!("refs/remotes/origin/{branch}")])
+        .status()
+        .map_err(|e| format!("git show-ref failed: {e}"))?;
+    Ok(result.success())
+}
+
+/// Checkout a branch (create if needed with `-B`).
+pub(crate) fn git_checkout(branch: &str, create_at: Option<&str>, dry_run: bool) -> Result<(), String> {
+    let mut cmd = Command::new("git");
+    match create_at {
+        Some(start) => { cmd.args(["-c", "advice.detachedHead=false", "checkout", "-B", branch, start]); }
+        None => { cmd.args(["checkout", branch]); }
+    };
+    exec(&mut cmd, dry_run)
+}
+
+/// Merge a ref into the current branch.
+pub(crate) fn git_merge(ref_: &str, message: &str, dry_run: bool) -> Result<(), String> {
+    exec(
+        Command::new("git").args(["merge", ref_, "-m", message]),
+        dry_run,
+    )
+}
+
+/// Stage all changes and commit.
+pub(crate) fn git_commit_all(message: &str, dry_run: bool) -> Result<(), String> {
+    exec(Command::new("git").args(["add", "-A"]), dry_run)?;
+    exec(
+        Command::new("git").args(["commit", "-m", message]),
+        dry_run,
+    )
+}
+
+/// Push a branch to origin.
+pub(crate) fn git_push(branch: &str, dry_run: bool) -> Result<(), String> {
+    exec(
+        Command::new("git").args(["push", "origin", branch]),
+        dry_run,
+    )
+}
+
+// ---------------------------------------------------------------------------
+// knope
+// ---------------------------------------------------------------------------
+
+/// Run `knope prepare-release`, optionally with a prerelease label.
+pub(crate) fn knope_prepare_release(prerelease_label: Option<&str>, dry_run: bool) -> Result<(), String> {
+    let mut cmd = Command::new("knope");
+    cmd.arg("prepare-release");
+    if let Some(label) = prerelease_label {
+        cmd.args(["--prerelease-label", label]);
+    }
+    exec(&mut cmd, dry_run)
+}
+
+/// Run `knope release` to create GitHub releases.
+pub(crate) fn knope_release(dry_run: bool) -> Result<(), String> {
+    exec(Command::new("knope").arg("release"), dry_run)
+}
+
+// ---------------------------------------------------------------------------
+// changesets
+// ---------------------------------------------------------------------------
+
+/// Check if any .changeset/*.md files exist.
+pub(crate) fn has_changesets(root: &std::path::Path) -> bool {
+    let dir = root.join(".changeset");
+    if !dir.is_dir() {
+        return false;
+    }
+    std::fs::read_dir(&dir)
+        .map(|entries| {
+            entries
+                .filter_map(Result::ok)
+                .any(|e| e.path().extension().is_some_and(|ext| ext == "md"))
+        })
+        .unwrap_or(false)
+}

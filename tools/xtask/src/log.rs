@@ -32,3 +32,17 @@ pub(crate) fn file_error(file: &str, line: Option<usize>, message: &str) {
         style(location).cyan(),
     );
 }
+
+// ---------------------------------------------------------------------------
+// Formatting helpers (return styled strings, don't print)
+// ---------------------------------------------------------------------------
+
+/// Format text as a label (cyan).
+pub(crate) fn label(text: &str) -> String {
+    format!("{}", style(text).cyan())
+}
+
+/// Format text as a highlighted value (green bold).
+pub(crate) fn value(text: &str) -> String {
+    format!("{}", style(text).green().bold())
+}
