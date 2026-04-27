@@ -53,3 +53,11 @@ return data. Orchestration functions (`run()`) are allowed to call
   results, and errors.
 - All user-facing output goes through `log::*`, never raw
   `println!`/`eprintln!`.
+
+## CI compatibility
+
+The `console` crate auto-detects non-TTY environments and disables colors
+and styling. No `--no-color` flag or CI-specific codepath is needed --
+`log::*` produces clean plain text when piped or running in CI. If
+interactive prompts are ever added, they must check for a TTY or respect
+a `--non-interactive` flag.
