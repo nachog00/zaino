@@ -42,6 +42,7 @@ pub(crate) fn run(green_commit: &str, root: &Path, dry_run: bool) -> Result<(), 
     // Check for changesets -- if none, no version bump needed.
     if !ci::has_changesets(root) {
         log::info("No changesets found. rc advanced but no version bump.");
+        ci::set_output("rc_cut", "false");
         return Ok(());
     }
 
@@ -65,6 +66,10 @@ pub(crate) fn run(green_commit: &str, root: &Path, dry_run: bool) -> Result<(), 
 
     ci::git_push("rc", dry_run)?;
     ci::knope_release(dry_run)?;
+
+    ci::set_output("rc_cut", "true");
+    ci::set_output("rc_tag", &release.rc_tag());
+    ci::set_output("rc_sha", &ci::git_rev_parse("HEAD")?);
 
     log::ok(&format!("RC release complete: {}", release.rc_tag()));
     Ok(())

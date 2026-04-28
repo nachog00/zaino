@@ -8,6 +8,7 @@ on:
 
 permissions:
   contents: write
+  actions: write
 
 concurrency:
   group: rc-update
@@ -18,6 +19,10 @@ jobs:
     name: Advance RC
     runs-on: ubuntu-latest
     if: ${{ github.event.workflow_run.conclusion == 'success' }}
+    outputs:
+      rc_cut: ${{ steps.advance.outputs.rc_cut }}
+      rc_tag: ${{ steps.advance.outputs.rc_tag }}
+      rc_sha: ${{ steps.advance.outputs.rc_sha }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -36,8 +41,24 @@ jobs:
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
       - name: Advance RC
+        id: advance
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           cargo run --package xtask -- versioning advance-rc \
             --green-commit ${{ github.event.workflow_run.head_sha }}
+
+  deploy-heavy-test:
+    name: Dispatch Heavy Deploy
+    needs: advance-rc
+    if: needs.advance-rc.outputs.rc_cut == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Dispatch heavy deploy
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh workflow run heavy-deploy.yml \
+            --repo ${{ github.repository }} \
+            -f rc_sha=${{ needs.advance-rc.outputs.rc_sha }} \
+            -f rc_tag=${{ needs.advance-rc.outputs.rc_tag }}

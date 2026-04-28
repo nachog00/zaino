@@ -322,6 +322,21 @@ pub(crate) fn gh_release_create(
 }
 
 // ---------------------------------------------------------------------------
+// github actions outputs
+// ---------------------------------------------------------------------------
+
+/// Write a key=value pair to `$GITHUB_OUTPUT` if running in CI.
+/// No-op locally.
+pub(crate) fn set_output(key: &str, value: &str) {
+    if let Ok(path) = std::env::var("GITHUB_OUTPUT") {
+        use std::io::Write;
+        if let Ok(mut f) = std::fs::OpenOptions::new().append(true).open(&path) {
+            let _ = writeln!(f, "{key}={value}");
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
 // changesets
 // ---------------------------------------------------------------------------
 
