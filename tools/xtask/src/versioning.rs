@@ -6,8 +6,7 @@
 
 mod advance_rc;
 mod changeset;
-mod release_pr_body;
-mod release_stable;
+mod release;
 pub(crate) mod sync_workspace_deps;
 mod version_table;
 
@@ -30,6 +29,14 @@ pub(crate) enum Command {
     },
     /// Print the release dashboard PR body (markdown) to stdout.
     ReleasePrBody,
+    /// Print the release dashboard PR title to stdout.
+    ReleasePrTitle,
+    /// Print the RC comment line to stdout.
+    ReleaseRcComment {
+        /// Short commit SHA for the RC comment.
+        #[arg(long)]
+        short_sha: String,
+    },
     /// Run the stable release: finalize versions, create releases, sync to dev.
     ReleaseStable,
 }
@@ -38,7 +45,15 @@ pub(crate) fn run(command: Command, root: &Path, dry_run: bool) -> Result<(), St
     match command {
         Command::Changeset { action } => changeset::run(action, root),
         Command::AdvanceRc { green_commit } => advance_rc::run(&green_commit, root, dry_run),
-        Command::ReleasePrBody => release_pr_body::run(root),
-        Command::ReleaseStable => release_stable::run(root, dry_run),
+        Command::ReleasePrBody => release::pr_body::run(root),
+        Command::ReleasePrTitle => {
+            print!("{}", release::pr_body::title());
+            Ok(())
+        }
+        Command::ReleaseRcComment { short_sha } => {
+            print!("{}", release::pr_body::rc_comment(&short_sha));
+            Ok(())
+        }
+        Command::ReleaseStable => release::stable::run(root, dry_run),
     }
 }

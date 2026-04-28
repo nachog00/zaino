@@ -7,7 +7,7 @@
 use std::path::Path;
 
 use crate::{ci, log};
-use super::sync_workspace_deps;
+use crate::versioning::sync_workspace_deps;
 
 pub(crate) fn run(root: &Path, dry_run: bool) -> Result<(), String> {
     log::info("Preparing stable release.");

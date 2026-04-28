@@ -5,6 +5,7 @@ edition = "2021"
 publish = false
 
 [dependencies]
+chrono = "0.4"
 clap = { version = "4", features = ["derive"] }
 console = "0.15"
 semver = "1"
