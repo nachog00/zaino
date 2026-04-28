@@ -63,26 +63,25 @@ impl VersionTable {
         out
     }
 
-    /// Render as markdown table with optional changelog sections.
-    pub(crate) fn to_markdown(&self) -> String {
+    /// Render the version table as markdown.
+    pub(crate) fn to_markdown_table(&self) -> String {
         let mut out = String::new();
-
         out.push_str("| Crate | Version |\n");
         out.push_str("| ----- | ------- |\n");
         for entry in &self.entries {
             out.push_str(&format!("| {} | {} |\n", entry.name, entry.version));
         }
+        out
+    }
 
-        let has_changelogs = self.entries.iter().any(|e| e.changelog.is_some());
-        if has_changelogs {
-            out.push('\n');
-            for entry in &self.entries {
-                if let Some(ref cl) = entry.changelog {
-                    out.push_str(&format!("### {}\n\n{cl}\n\n", entry.name));
-                }
+    /// Render changelog entries as markdown sections.
+    pub(crate) fn to_markdown_changelog(&self) -> String {
+        let mut out = String::new();
+        for entry in &self.entries {
+            if let Some(ref cl) = entry.changelog {
+                out.push_str(&format!("### {}\n\n{cl}\n\n", entry.name));
             }
         }
-
         out
     }
 }

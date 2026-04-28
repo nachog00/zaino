@@ -22,11 +22,21 @@ pub(crate) fn run(root: &Path) -> Result<(), String> {
     let table = VersionTable::from_workspace(root, &packages)?;
 
     let mut body = String::new();
+
     body.push_str(
         "Merging this PR promotes the current RC to stable and triggers the release workflow.\n\n",
     );
+
+    body.push_str("---\n\n");
     body.push_str("## Crate Versions\n\n");
-    body.push_str(&table.to_markdown());
+    body.push_str(&table.to_markdown_table());
+
+    let changelog = table.to_markdown_changelog();
+    if !changelog.is_empty() {
+        body.push_str("\n---\n\n");
+        body.push_str("## Changelog\n\n");
+        body.push_str(&changelog);
+    }
 
     print!("{body}");
     Ok(())
