@@ -20,6 +20,9 @@ jobs:
           ref: rc
           fetch-depth: 0
 
+      - name: Fetch tags
+        run: git fetch --tags origin
+
       - uses: dtolnay/rust-toolchain@stable
 
       - name: Check if stable exists
