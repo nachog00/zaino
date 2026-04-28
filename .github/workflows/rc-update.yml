@@ -24,6 +24,9 @@ jobs:
           fetch-depth: 0
           token: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Fetch tags
+        run: git fetch --tags origin
+
       - uses: dtolnay/rust-toolchain@stable
       - uses: knope-dev/action@v2.1.2
 
