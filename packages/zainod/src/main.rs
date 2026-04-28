@@ -21,3 +21,4 @@ async fn main() {
         Command::GenerateConfig { output } => Command::generate_config(output),
     }
 }
+// feature a placeholder
