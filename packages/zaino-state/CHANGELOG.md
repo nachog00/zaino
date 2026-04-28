@@ -64,6 +64,12 @@ and this library adheres to Rust's notion of
 - `non_finalized_state::NonfinalizedBlockCacheSnapshot` visibility narrowed
   from `pub` to `pub(crate)`; it is no longer part of the public API.
   External consumers should use `ChainIndexSnapshot` instead.
+## 0.1.1-rc.5 (2026-04-28)
+
+### Fixes
+
+- Placeholder changeset for release flow testing.
+
 ## 0.1.1-rc.4 (2026-04-28)
 
 ### Fixes
