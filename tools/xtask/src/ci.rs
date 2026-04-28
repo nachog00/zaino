@@ -284,6 +284,43 @@ pub(crate) fn gh_update_deployment_status(
     Ok(())
 }
 
+/// Publish a crate to crates.io.
+pub(crate) fn cargo_publish(crate_name: &str, dry_run: bool) -> Result<(), String> {
+    let mut cmd = Command::new("cargo");
+    cmd.args(["publish", "--package", crate_name]);
+    if dry_run {
+        cmd.arg("--dry-run");
+    }
+    exec(&mut cmd, false) // always execute (cargo --dry-run handles it)
+}
+
+/// Create a GitHub release via `gh release create`.
+pub(crate) fn gh_release_create(
+    tag: &str,
+    title: &str,
+    body: &str,
+    dry_run: bool,
+) -> Result<(), String> {
+    if dry_run {
+        log::info(&format!("[dry-run] would create release: tag={tag} title={title}"));
+        return Ok(());
+    }
+
+    // Write body to a temp file to avoid shell quoting issues.
+    let body_path = std::env::temp_dir().join("xtask-release-body.md");
+    std::fs::write(&body_path, body)
+        .map_err(|e| format!("cannot write release body: {e}"))?;
+
+    exec(
+        Command::new("gh").args([
+            "release", "create", tag,
+            "--title", title,
+            "--notes-file", &body_path.to_string_lossy(),
+        ]),
+        false,
+    )
+}
+
 // ---------------------------------------------------------------------------
 // changesets
 // ---------------------------------------------------------------------------
