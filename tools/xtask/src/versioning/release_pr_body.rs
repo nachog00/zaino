@@ -1,13 +1,22 @@
-//! Generate the release dashboard PR body.
+//! Generate the release dashboard PR title and body.
 //!
-//! Pure computation: builds a `VersionTable` and renders it as markdown
-//! for the rc→stable PR. Outputs to stdout.
+//! The body is regenerated each time rc advances, showing "what would
+//! happen if merged now". History is tracked via PR comments (one per
+//! RC update).
 
 use std::path::Path;
 
 use super::version_table::VersionTable;
 use crate::workspace;
 
+/// Derive the release PR title.
+///
+/// TODO: Final format TBD (likely date-based release identity).
+pub(crate) fn title() -> String {
+    "Release".to_string()
+}
+
+/// Print the release PR body (markdown) to stdout.
 pub(crate) fn run(root: &Path) -> Result<(), String> {
     let packages = workspace::knope_packages(root)?;
     let table = VersionTable::from_workspace(root, &packages)?;

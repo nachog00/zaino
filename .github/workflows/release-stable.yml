@@ -1,7 +1,8 @@
 name: Stable Release
 
 on:
-  push:
+  pull_request:
+    types: [closed]
     branches: [stable]
 
 permissions:
@@ -11,9 +12,11 @@ jobs:
   release:
     name: Create Stable Release
     runs-on: ubuntu-latest
+    if: github.event.pull_request.merged == true
     steps:
       - uses: actions/checkout@v4
         with:
+          ref: stable
           fetch-depth: 0
           token: ${{ secrets.GITHUB_TOKEN }}
 

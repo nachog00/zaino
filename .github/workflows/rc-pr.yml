@@ -31,19 +31,28 @@ jobs:
             echo "exists=false" >> $GITHUB_OUTPUT
           fi
 
+      - name: Generate PR content
+        if: steps.check-stable.outputs.exists == 'true'
+        id: content
+        run: |
+          BODY=$(cargo run --package xtask -- versioning release-pr-body)
+          # Write to file to avoid shell quoting issues with multiline markdown
+          echo "$BODY" > /tmp/pr-body.md
+
       - name: Create or update PR
         if: steps.check-stable.outputs.exists == 'true'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          BODY=$(cargo run --package xtask -- versioning release-pr-body)
-
           EXISTING_PR=$(gh pr list --base stable --head rc --json number --jq '.[0].number' 2>/dev/null || echo "")
+          RC_SHA=$(git rev-parse --short HEAD)
+          COMMENT="RC updated to ${RC_SHA} ($(date -u +%Y-%m-%d))"
 
           if [ -n "$EXISTING_PR" ]; then
-            gh pr edit "$EXISTING_PR" --body "$BODY"
+            gh pr edit "$EXISTING_PR" --body-file /tmp/pr-body.md
+            gh pr comment "$EXISTING_PR" --body "$COMMENT"
           else
             gh pr create --base stable --head rc \
               --title "Release" \
-              --body "$BODY"
+              --body-file /tmp/pr-body.md
           fi

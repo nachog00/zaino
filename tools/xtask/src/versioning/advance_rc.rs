@@ -3,6 +3,8 @@
 //! This is the nightly automation: after tier 2 passes on dev HEAD, merge
 //! dev into rc, run knope to bump versions and generate changelogs, then
 //! create GitHub pre-releases for each crate.
+//!
+//! Assumes the `rc` branch already exists (manual bootstrapping).
 
 use std::path::Path;
 
@@ -12,30 +14,25 @@ pub(crate) fn run(green_commit: &str, root: &Path, dry_run: bool) -> Result<(), 
     log::info(&format!("Advancing rc to green commit {green_commit}"));
 
     // Check if rc already contains this commit.
-    if ci::git_remote_branch_exists("rc")? {
-        if ci::git_is_ancestor(green_commit, "origin/rc")? {
-            log::info("rc already contains this commit. Nothing to do.");
-            return Ok(());
-        }
+    if ci::git_is_ancestor(green_commit, "origin/rc")? {
+        log::info("rc already contains this commit. Nothing to do.");
+        return Ok(());
+    }
 
-        // Merge dev into rc. rc's knope-set versions survive because
-        // developers don't touch version lines in Cargo.toml.
-        ci::git_checkout("rc", None, dry_run)?;
-        let short = &green_commit[..green_commit.len().min(8)];
-        let merge_result = ci::git_merge(
-            green_commit,
-            &format!("chore: advance rc to dev {short}"),
-            dry_run,
-        );
+    // Merge dev into rc. rc's knope-set versions survive because
+    // developers don't touch version lines in Cargo.toml.
+    ci::git_checkout("rc", None, dry_run)?;
+    let short = &green_commit[..green_commit.len().min(8)];
+    let merge_result = ci::git_merge(
+        green_commit,
+        &format!("chore: advance rc to dev {short}"),
+        dry_run,
+    );
 
-        if let Err(e) = merge_result {
-            log::error(&format!("Merge conflict advancing rc: {e}"));
-            log::info("Manual resolution needed. Aborting rc advancement.");
-            return Err("rc advancement failed due to merge conflict".into());
-        }
-    } else {
-        log::info("Creating rc branch.");
-        ci::git_checkout("rc", Some(green_commit), dry_run)?;
+    if let Err(e) = merge_result {
+        log::error(&format!("Merge conflict advancing rc: {e}"));
+        log::info("Manual resolution needed. Aborting rc advancement.");
+        return Err("rc advancement failed due to merge conflict".into());
     }
 
     ci::git_push("rc", dry_run)?;
