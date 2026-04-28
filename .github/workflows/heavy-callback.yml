@@ -1,0 +1,43 @@
+name: Heavy Callback
+
+# Triggered when a deployment status changes to success in the
+# heavy-test environment. This means the external system (k8s)
+# finished the long sync and reported pass.
+#
+# Advances validated-rc to the deployment's commit, making it
+# eligible for release.
+
+on:
+  deployment_status:
+
+permissions:
+  contents: write
+
+jobs:
+  promote:
+    name: Promote Validated RC
+    runs-on: ubuntu-latest
+    if: >-
+      github.event.deployment_status.state == 'success' &&
+      github.event.deployment.environment == 'heavy-test'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: rc
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Fetch tags
+        run: git fetch --tags origin
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Configure git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Promote RC
+        run: |
+          cargo run --package xtask -- versioning promote-rc \
+            --rc-sha ${{ github.event.deployment.sha }}

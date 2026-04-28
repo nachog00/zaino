@@ -1,0 +1,62 @@
+name: Heavy Deploy
+
+# Triggered after an RC is cut. Creates a GitHub deployment for the RC
+# commit in the heavy-test environment. The external system (k8s) picks
+# up the deployment and runs long sync / soak tests.
+#
+# Stub: auto-passes by immediately setting deployment status to success.
+
+on:
+  workflow_run:
+    workflows: [RC Update]
+    types: [completed]
+  workflow_dispatch:
+    inputs:
+      rc_sha:
+        description: "RC commit SHA (defaults to rc HEAD)"
+        required: false
+      rc_tag:
+        description: "RC release tag (e.g. 2026-05-01-rc.0)"
+        required: false
+
+permissions:
+  contents: read
+  deployments: write
+
+jobs:
+  deploy:
+    name: Deploy for Heavy Testing
+    runs-on: ubuntu-latest
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: rc
+          fetch-depth: 0
+
+      - name: Fetch tags
+        run: git fetch --tags origin
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Determine RC info
+        id: rc
+        run: |
+          SHA="${{ inputs.rc_sha }}"
+          TAG="${{ inputs.rc_tag }}"
+          if [ -z "$SHA" ]; then
+            SHA=$(git rev-parse HEAD)
+          fi
+          if [ -z "$TAG" ]; then
+            TAG=$(git tag --points-at "$SHA" | grep -E '^[0-9]{4}-' | head -1 || echo "unknown")
+          fi
+          echo "sha=$SHA" >> $GITHUB_OUTPUT
+          echo "tag=$TAG" >> $GITHUB_OUTPUT
+
+      - name: Deploy for heavy testing
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          cargo run --package xtask -- versioning deploy-heavy-test \
+            --rc-sha ${{ steps.rc.outputs.sha }} \
+            --rc-tag ${{ steps.rc.outputs.tag }}

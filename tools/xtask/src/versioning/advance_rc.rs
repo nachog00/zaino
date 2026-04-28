@@ -9,6 +9,8 @@
 use std::path::Path;
 
 use crate::{ci, log};
+use super::release::name::ReleaseName;
+use super::sync_workspace_deps;
 
 pub(crate) fn run(green_commit: &str, root: &Path, dry_run: bool) -> Result<(), String> {
     log::info(&format!("Advancing rc to green commit {green_commit}"));
@@ -43,13 +45,27 @@ pub(crate) fn run(green_commit: &str, root: &Path, dry_run: bool) -> Result<(), 
         return Ok(());
     }
 
+    // Compute the release-event tag before knope runs.
+    let release = ReleaseName::next();
+    log::info(&format!("Cutting RC: {}", release.rc_tag()));
+
     // Cut the RC: bump versions, update changelogs, create releases.
-    log::info("Changesets found. Preparing RC release.");
     ci::knope_prepare_release(Some("rc"), dry_run)?;
+
+    // Knope bumps crate versions but not workspace dependency versions.
+    // Sync them so cargo can resolve pre-release versions.
+    log::info("Syncing workspace dependency versions.");
+    sync_workspace_deps::run(root, dry_run)?;
+
     ci::git_commit_all("chore: prepare rc release", dry_run)?;
+
+    // Tag with the release-event name (e.g. 2026-05-01-rc.0) alongside
+    // knope's per-crate tags.
+    ci::git_tag_and_push(&release.rc_tag(), dry_run)?;
+
     ci::git_push("rc", dry_run)?;
     ci::knope_release(dry_run)?;
 
-    log::ok("RC release complete.");
+    log::ok(&format!("RC release complete: {}", release.rc_tag()));
     Ok(())
 }
