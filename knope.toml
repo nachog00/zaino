@@ -38,5 +38,5 @@ name = "release"
 type = "Release"
 
 [github]
-owner = "zingolabs"
+owner = "nachog00"
 repo = "zaino"
