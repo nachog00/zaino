@@ -2,7 +2,7 @@ name: RC Pull Request
 
 on:
   workflow_run:
-    workflows: [RC Update]
+    workflows: [Heavy Validate]
     types: [completed]
 
 permissions:
@@ -17,7 +17,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: rc
+          ref: validated-rc
           fetch-depth: 0
 
       - name: Fetch tags
@@ -45,7 +45,6 @@ jobs:
             --short-sha "$(git rev-parse --short HEAD)")
           echo "comment=$COMMENT" >> $GITHUB_OUTPUT
 
-          # Body is multiline, use heredoc delimiter
           {
             echo "body<<PRBODYEOF"
             cargo run --package xtask -- versioning release-pr-body
@@ -57,9 +56,8 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          EXISTING_PR=$(gh pr list --base stable --head rc --json number --jq '.[0].number' 2>/dev/null || echo "")
+          EXISTING_PR=$(gh pr list --base stable --head validated-rc --json number --jq '.[0].number' 2>/dev/null || echo "")
 
-          # Write body to file for gh CLI (avoids shell quoting issues)
           cat <<'PRBODY' > /tmp/pr-body.md
           ${{ steps.content.outputs.body }}
           PRBODY
@@ -71,7 +69,7 @@ jobs:
             gh pr comment "$EXISTING_PR" \
               --body "${{ steps.content.outputs.comment }}"
           else
-            gh pr create --base stable --head rc \
+            gh pr create --base stable --head validated-rc \
               --title "${{ steps.content.outputs.title }}" \
               --body-file /tmp/pr-body.md
           fi

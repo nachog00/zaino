@@ -149,6 +149,105 @@ pub(crate) fn knope_release(dry_run: bool) -> Result<(), String> {
 }
 
 // ---------------------------------------------------------------------------
+// gh cli
+// ---------------------------------------------------------------------------
+
+/// Run a `gh api` call and capture stdout. Respects dry_run for mutating
+/// calls (POST/PUT/DELETE). GET calls always execute (they're read-only).
+fn gh_api(
+    endpoint: &str,
+    method: &str,
+    fields: &[(&str, &str)],
+    raw_fields: &[(&str, &str)],
+    dry_run: bool,
+) -> Result<String, String> {
+    let is_mutating = method != "GET";
+
+    let mut cmd = Command::new("gh");
+    cmd.args(["api", endpoint, "--method", method]);
+    for (key, value) in fields {
+        cmd.args(["-f", &format!("{key}={value}")]);
+    }
+    for (key, value) in raw_fields {
+        cmd.args(["-F", &format!("{key}={value}")]);
+    }
+
+    if dry_run && is_mutating {
+        let args: Vec<_> = cmd.get_args().map(|a| a.to_string_lossy().to_string()).collect();
+        log::info(&format!("[dry-run] would run: gh {}", args.join(" ")));
+        return Ok("{}".into());
+    }
+
+    let output = cmd
+        .output()
+        .map_err(|e| format!("failed to run gh api: {e}"))?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(format!("gh api {endpoint} failed: {stderr}"));
+    }
+
+    Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
+}
+
+/// Create a GitHub deployment. Returns the deployment ID.
+pub(crate) fn gh_create_deployment(
+    environment: &str,
+    ref_: &str,
+    description: &str,
+    dry_run: bool,
+) -> Result<String, String> {
+    let response = gh_api(
+        "repos/{owner}/{repo}/deployments",
+        "POST",
+        &[
+            ("ref", ref_),
+            ("environment", environment),
+            ("description", description),
+        ],
+        &[
+            ("auto_merge", "false"),
+            ("required_contexts", "[]"),
+        ],
+        dry_run,
+    )?;
+
+    if dry_run {
+        return Ok("dry-run-id".into());
+    }
+
+    // Extract "id" from JSON response.
+    response
+        .split("\"id\":")
+        .nth(1)
+        .and_then(|s| s.trim().split(|c: char| !c.is_ascii_digit()).next())
+        .map(String::from)
+        .ok_or_else(|| "cannot parse deployment id from response".into())
+}
+
+/// Update a GitHub deployment status.
+pub(crate) fn gh_update_deployment_status(
+    deployment_id: &str,
+    state: &str,
+    description: &str,
+    dry_run: bool,
+) -> Result<(), String> {
+    let endpoint = format!(
+        "repos/{{owner}}/{{repo}}/deployments/{deployment_id}/statuses"
+    );
+
+    gh_api(
+        &endpoint,
+        "POST",
+        &[("state", state), ("description", description)],
+        &[],
+        dry_run,
+    )?;
+
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
 // changesets
 // ---------------------------------------------------------------------------
 
