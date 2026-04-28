@@ -120,6 +120,15 @@ pub(crate) fn git_push(branch: &str, dry_run: bool) -> Result<(), String> {
     )
 }
 
+/// Create a lightweight tag and push it.
+pub(crate) fn git_tag_and_push(tag: &str, dry_run: bool) -> Result<(), String> {
+    exec(Command::new("git").args(["tag", tag]), dry_run)?;
+    exec(
+        Command::new("git").args(["push", "origin", tag]),
+        dry_run,
+    )
+}
+
 // ---------------------------------------------------------------------------
 // knope
 // ---------------------------------------------------------------------------

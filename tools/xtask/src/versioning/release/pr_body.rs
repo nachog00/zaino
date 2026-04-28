@@ -12,26 +12,31 @@ use crate::workspace;
 
 /// Derive the release PR title from the current release schedule.
 pub(crate) fn title() -> String {
-    ReleaseName::current().pr_title()
+    ReleaseName::next().pr_title()
 }
 
-/// The RC comment for the PR trail (e.g. "RC: 2026-05-02-rc.1 (abc1234)").
+/// The RC comment for the PR trail (e.g. "**2026-05-01-rc.1** (abc1234)").
 pub(crate) fn rc_comment(short_sha: &str) -> String {
-    let name = ReleaseName::current();
-    format!("**{}** ({})", name.rc_tag(), short_sha)
+    match ReleaseName::latest() {
+        Some(name) => format!("**{}** ({})", name.rc_tag(), short_sha),
+        None => format!("RC updated ({})", short_sha),
+    }
 }
 
 /// Print the release PR body (markdown) to stdout.
 pub(crate) fn run(root: &Path) -> Result<(), String> {
     let packages = workspace::knope_packages(root)?;
     let table = VersionTable::from_workspace(root, &packages)?;
-    let name = ReleaseName::current();
+
+    let rc_label = match ReleaseName::latest() {
+        Some(name) => name.rc_tag(),
+        None => "pending".to_string(),
+    };
 
     let mut body = String::new();
 
     body.push_str(&format!(
-        "Merging this PR promotes **{}** to stable and triggers the release workflow.\n\n",
-        name.rc_tag()
+        "Merging this PR promotes **{rc_label}** to stable and triggers the release workflow.\n\n",
     ));
 
     body.push_str("---\n\n");

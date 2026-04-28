@@ -2,7 +2,11 @@
 //!
 //! Releases follow a periodic schedule. The release name is based on the
 //! next scheduled release date. RCs within a period are numbered
-//! sequentially: `2026-05-02-rc.0`, `2026-05-02-rc.1`, etc.
+//! sequentially: `2026-05-01-rc.0`, `2026-05-01-rc.1`, etc.
+//!
+//! Two constructors serve different callers:
+//! - `next()`: computes the next RC to create (advance-rc, before tagging)
+//! - `latest()`: reads the most recent RC tag (PR body, after tagging)
 
 use std::process::Command;
 
@@ -22,8 +26,8 @@ pub(crate) struct ReleaseName {
 }
 
 impl ReleaseName {
-    /// Compute the release name for the current date and git state.
-    pub(crate) fn current() -> Self {
+    /// The next RC to create. Call this before tagging.
+    pub(crate) fn next() -> Self {
         let target_date = next_release_date();
         let target_str = target_date.format("%Y-%m-%d").to_string();
         let rc_number = next_rc_number(&target_str);
@@ -33,7 +37,19 @@ impl ReleaseName {
         }
     }
 
-    /// The release target date (e.g. `2026-05-02`).
+    /// The most recent RC that was tagged. Call this after tagging.
+    /// Returns `None` if no RC tags exist for the current release period.
+    pub(crate) fn latest() -> Option<Self> {
+        let target_date = next_release_date();
+        let target_str = target_date.format("%Y-%m-%d").to_string();
+        let rc_number = latest_rc_number(&target_str)?;
+        Some(Self {
+            target_date,
+            rc_number,
+        })
+    }
+
+    /// The release target date (e.g. `2026-05-01`).
     pub(crate) fn target(&self) -> String {
         self.target_date.format("%Y-%m-%d").to_string()
     }
@@ -43,12 +59,12 @@ impl ReleaseName {
         self.rc_number
     }
 
-    /// The full RC tag (e.g. `2026-05-02-rc.0`).
+    /// The full RC tag (e.g. `2026-05-01-rc.0`).
     pub(crate) fn rc_tag(&self) -> String {
         format!("{}-rc.{}", self.target(), self.rc_number)
     }
 
-    /// The PR title for this release (e.g. `Release 2026-05-02`).
+    /// The PR title for this release (e.g. `Release 2026-05-01`).
     pub(crate) fn pr_title(&self) -> String {
         format!("Release {}", self.target())
     }
@@ -78,8 +94,18 @@ fn next_release_date() -> NaiveDate {
     epoch + chrono::Duration::days(next_period * cadence_days)
 }
 
-/// Count existing RC tags for a release target to derive the next RC number.
+/// Find the highest existing RC number for a target date.
+fn latest_rc_number(target: &str) -> Option<u32> {
+    rc_numbers(target).into_iter().max()
+}
+
+/// Compute the next RC number (highest existing + 1, or 0 if none).
 fn next_rc_number(target: &str) -> u32 {
+    latest_rc_number(target).map(|n| n + 1).unwrap_or(0)
+}
+
+/// List all RC numbers for a target date from git tags.
+fn rc_numbers(target: &str) -> Vec<u32> {
     let prefix = format!("{target}-rc.");
     let output = Command::new("git")
         .args(["tag", "-l", &format!("{prefix}*")])
@@ -93,9 +119,7 @@ fn next_rc_number(target: &str) -> u32 {
         .lines()
         .filter_map(|line| line.strip_prefix(&prefix))
         .filter_map(|n| n.parse::<u32>().ok())
-        .max()
-        .map(|n| n + 1)
-        .unwrap_or(0)
+        .collect()
 }
 
 #[cfg(test)]
