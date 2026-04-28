@@ -24,6 +24,9 @@ jobs:
         run: git fetch --tags origin
 
       - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          cache-targets: false
 
       - name: Check if stable exists
         id: check-stable

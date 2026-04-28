@@ -21,6 +21,9 @@ jobs:
           token: ${{ secrets.GITHUB_TOKEN }}
 
       - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          cache-targets: false
       - uses: knope-dev/action@v2.1.2
 
       - name: Configure git
