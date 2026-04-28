@@ -9,6 +9,7 @@
 use std::path::Path;
 
 use crate::{ci, log};
+use super::sync_workspace_deps;
 
 pub(crate) fn run(green_commit: &str, root: &Path, dry_run: bool) -> Result<(), String> {
     log::info(&format!("Advancing rc to green commit {green_commit}"));
@@ -46,6 +47,12 @@ pub(crate) fn run(green_commit: &str, root: &Path, dry_run: bool) -> Result<(), 
     // Cut the RC: bump versions, update changelogs, create releases.
     log::info("Changesets found. Preparing RC release.");
     ci::knope_prepare_release(Some("rc"), dry_run)?;
+
+    // Knope bumps crate versions but not workspace dependency versions.
+    // Sync them so cargo can resolve pre-release versions.
+    log::info("Syncing workspace dependency versions.");
+    sync_workspace_deps::run(root, dry_run)?;
+
     ci::git_commit_all("chore: prepare rc release", dry_run)?;
     ci::git_push("rc", dry_run)?;
     ci::knope_release(dry_run)?;

@@ -8,6 +8,7 @@ mod advance_rc;
 mod changeset;
 mod release_pr_body;
 mod release_stable;
+pub(crate) mod sync_workspace_deps;
 mod version_table;
 
 use std::path::Path;

@@ -7,11 +7,13 @@
 use std::path::Path;
 
 use crate::{ci, log};
+use super::sync_workspace_deps;
 
 pub(crate) fn run(root: &Path, dry_run: bool) -> Result<(), String> {
     log::info("Preparing stable release.");
 
     ci::knope_prepare_release(None, dry_run)?;
+    sync_workspace_deps::run(root, dry_run)?;
     ci::git_commit_all("chore: prepare stable release", dry_run)?;
     ci::git_push("stable", dry_run)?;
 
