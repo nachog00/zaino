@@ -33,25 +33,42 @@ jobs:
 
       - name: Generate PR content
         if: steps.check-stable.outputs.exists == 'true'
+        id: content
         run: |
-          cargo run --package xtask -- versioning release-pr-body > /tmp/pr-body.md
-          cargo run --package xtask -- versioning release-pr-title > /tmp/pr-title.txt
-          cargo run --package xtask -- versioning release-rc-comment \
-            --short-sha "$(git rev-parse --short HEAD)" > /tmp/pr-comment.txt
+          TITLE=$(cargo run --package xtask -- versioning release-pr-title)
+          echo "title=$TITLE" >> $GITHUB_OUTPUT
+
+          COMMENT=$(cargo run --package xtask -- versioning release-rc-comment \
+            --short-sha "$(git rev-parse --short HEAD)")
+          echo "comment=$COMMENT" >> $GITHUB_OUTPUT
+
+          # Body is multiline, use heredoc delimiter
+          {
+            echo "body<<PRBODYEOF"
+            cargo run --package xtask -- versioning release-pr-body
+            echo "PRBODYEOF"
+          } >> $GITHUB_OUTPUT
 
       - name: Create or update PR
         if: steps.check-stable.outputs.exists == 'true'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          TITLE=$(cat /tmp/pr-title.txt)
           EXISTING_PR=$(gh pr list --base stable --head rc --json number --jq '.[0].number' 2>/dev/null || echo "")
 
+          # Write body to file for gh CLI (avoids shell quoting issues)
+          cat <<'PRBODY' > /tmp/pr-body.md
+          ${{ steps.content.outputs.body }}
+          PRBODY
+
           if [ -n "$EXISTING_PR" ]; then
-            gh pr edit "$EXISTING_PR" --title "$TITLE" --body-file /tmp/pr-body.md
-            gh pr comment "$EXISTING_PR" --body-file /tmp/pr-comment.txt
+            gh pr edit "$EXISTING_PR" \
+              --title "${{ steps.content.outputs.title }}" \
+              --body-file /tmp/pr-body.md
+            gh pr comment "$EXISTING_PR" \
+              --body "${{ steps.content.outputs.comment }}"
           else
             gh pr create --base stable --head rc \
-              --title "$TITLE" \
+              --title "${{ steps.content.outputs.title }}" \
               --body-file /tmp/pr-body.md
           fi
