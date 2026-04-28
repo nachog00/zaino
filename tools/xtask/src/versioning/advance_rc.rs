@@ -58,7 +58,7 @@ pub(crate) fn run(green_commit: &str, root: &Path, dry_run: bool) -> Result<(), 
     log::info("Syncing workspace dependency versions.");
     sync_workspace_deps::run(root, dry_run)?;
 
-    ci::git_commit_all("chore: prepare rc release", dry_run)?;
+    ci::git_commit_all(&format!("chore: prepare rc release ({})", release.rc_tag()), dry_run)?;
 
     // Tag with the release-event name (e.g. 2026-05-01-rc.0) alongside
     // knope's per-crate tags.
