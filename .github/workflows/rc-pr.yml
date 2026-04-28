@@ -2,7 +2,7 @@ name: RC Pull Request
 
 on:
   workflow_run:
-    workflows: [Heavy Validate]
+    workflows: [Heavy Callback]
     types: [completed]
 
 permissions:

@@ -190,6 +190,50 @@ fn gh_api(
     Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
 }
 
+/// Run a `gh api` call with a JSON body piped via stdin.
+fn gh_api_with_body(
+    endpoint: &str,
+    method: &str,
+    json_body: &str,
+    dry_run: bool,
+) -> Result<String, String> {
+    if dry_run {
+        log::info(&format!(
+            "[dry-run] would run: gh api {endpoint} --method {method} (body: {json_body})"
+        ));
+        return Ok("{}".into());
+    }
+
+    log::info(&format!("running: gh api {endpoint} --method {method}"));
+
+    let mut child = Command::new("gh")
+        .args(["api", endpoint, "--method", method, "--input", "-"])
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .map_err(|e| format!("failed to run gh api: {e}"))?;
+
+    use std::io::Write;
+    child
+        .stdin
+        .take()
+        .expect("stdin was piped")
+        .write_all(json_body.as_bytes())
+        .map_err(|e| format!("failed to write to gh stdin: {e}"))?;
+
+    let output = child
+        .wait_with_output()
+        .map_err(|e| format!("failed to wait for gh: {e}"))?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(format!("gh api {endpoint} failed: {stderr}"));
+    }
+
+    Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
+}
+
 /// Create a GitHub deployment. Returns the deployment ID.
 pub(crate) fn gh_create_deployment(
     environment: &str,
@@ -197,18 +241,17 @@ pub(crate) fn gh_create_deployment(
     description: &str,
     dry_run: bool,
 ) -> Result<String, String> {
-    let response = gh_api(
+    // Use --input - to pass JSON body directly, since required_contexts
+    // is an array that -F can't handle properly.
+    let body = format!(
+        r#"{{"ref":"{}","environment":"{}","description":"{}","auto_merge":false,"required_contexts":[]}}"#,
+        ref_, environment, description
+    );
+
+    let response = gh_api_with_body(
         "repos/{owner}/{repo}/deployments",
         "POST",
-        &[
-            ("ref", ref_),
-            ("environment", environment),
-            ("description", description),
-        ],
-        &[
-            ("auto_merge", "false"),
-            ("required_contexts", "[]"),
-        ],
+        &body,
         dry_run,
     )?;
 
@@ -235,15 +278,9 @@ pub(crate) fn gh_update_deployment_status(
     let endpoint = format!(
         "repos/{{owner}}/{{repo}}/deployments/{deployment_id}/statuses"
     );
+    let body = format!(r#"{{"state":"{state}","description":"{description}"}}"#);
 
-    gh_api(
-        &endpoint,
-        "POST",
-        &[("state", state), ("description", description)],
-        &[],
-        dry_run,
-    )?;
-
+    gh_api_with_body(&endpoint, "POST", &body, dry_run)?;
     Ok(())
 }
 
