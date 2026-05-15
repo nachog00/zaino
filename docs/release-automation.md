@@ -1,6 +1,54 @@
 # Release Automation
 
-## Overview
+## How a change gets released
+
+```mermaid
+flowchart TD
+    write["🧑‍💻 Developer writes code"]
+    pr["Opens a PR with a changeset\ndescribing the change"]
+    merge["PR merges to dev\n(squash merge)"]
+    night["Every night, the full test\nsuite runs against dev"]
+    rc["If tests pass, a release\ncandidate is cut automatically"]
+    deploy["The RC is deployed to a real\nmainnet environment for validation"]
+    soak["The deployment runs for hours/days:\nfull sync, soak test, benchmarks"]
+    ready["If validation passes, the RC\nbecomes eligible for release"]
+    bless["A maintainer reviews the release\nPR and merges when ready"]
+    release["Versions are finalized, crates\npublished, GitHub releases created"]
+    done["Dev is updated with the\nfinal versions. Cycle restarts."]
+
+    write --> pr
+    pr --> merge
+    merge --> night
+    night -->|tests pass| rc
+    night -->|tests fail| night
+    rc --> deploy
+    deploy --> soak
+    soak -->|pass| ready
+    soak -->|fail| night
+    ready --> bless
+    bless --> release
+    release --> done
+    done -.->|new work| write
+
+    style write fill:#e1f5fe
+    style done fill:#e8f5e9
+    style bless fill:#fff3e0
+    style soak fill:#fce4ec
+```
+
+Each step answers a question:
+
+| Step | Question answered |
+| ---- | ----------------- |
+| PR with changeset | "What changed and how significant is it?" |
+| Dev merge | "Does it pass basic quality checks?" |
+| Nightly tests | "Does it work with the full integration suite?" |
+| RC cut | "What would the next release look like?" |
+| Heavy deployment | "Does it survive real-world conditions?" |
+| Release blessing | "Are we confident enough to ship this?" |
+| Stable release | "It's out. What versions, where to find them." |
+
+## Technical Detail
 
 The release system is a state machine operating on git branches. A
 commit progresses through states (branches) as it passes successive
