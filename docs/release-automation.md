@@ -1,5 +1,72 @@
 # Release Automation
 
+## Developer experience
+
+Release windows open on a regular cadence — weekly, on Fridays. A
+release window is an *opportunity* to release, not an obligation. If
+nothing passed all the gates, nothing ships. If validated work is
+ready, a maintainer decides whether to release it.
+
+**During the week**, you work normally. Open PRs against `dev`, include
+a changeset file describing your change and how significant it is
+(`patch`, `minor`, or `major` for each crate affected). When your PR
+merges, you're done — the automation takes over.
+
+**In the background**, the system is constantly trying to push your work
+through the quality gates. Every night it runs the full integration
+suite. If it passes, a release candidate is cut and deployed to a real
+mainnet environment for long-running validation. This happens
+automatically — you don't need to do anything.
+
+**If the boundaries stop advancing**, it means something in `dev` is
+broken — the nightly tests are failing, or the heavy deployment is
+crashing. This is the signal that a fix needs to land before the next
+release candidate can be produced.
+
+**When the release window arrives**, a maintainer checks: is there a
+validated release candidate? If yes, they can merge the release PR —
+versions are finalized, crates published, GitHub releases created. If
+not, the window passes and the next one opens the following week. No
+pressure, no ceremony.
+
+**Version numbers are not decided upfront.** They're derived
+automatically from the changesets that each PR contributed. If all the
+changes since the last release were patches, the version gets a patch
+bump. If someone landed a new feature, it's a minor bump. The system
+aggregates across all PRs and computes the right version for each crate
+independently.
+
+```mermaid
+flowchart LR
+    subgraph period ["Release period (1-2 weeks)"]
+        direction TB
+        pr1["PR #1\n(patch)"]
+        pr2["PR #2\n(minor)"]
+        pr3["PR #3\n(patch)"]
+        pr4["PR #4\n(fix)"]
+    end
+
+    subgraph auto ["Automation (continuous)"]
+        direction TB
+        nightly["Nightly tests"]
+        rc["RC cut"]
+        heavy["Heavy validation"]
+    end
+
+    subgraph friday ["Release day"]
+        direction TB
+        review["Maintainer reviews"]
+        ship["Ship it"]
+    end
+
+    period --> auto
+    auto --> friday
+
+    style period fill:#e1f5fe
+    style auto fill:#f3e5f5
+    style friday fill:#e8f5e9
+```
+
 ## How a change gets released
 
 ```mermaid
