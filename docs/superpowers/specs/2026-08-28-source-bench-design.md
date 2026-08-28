@@ -1,7 +1,7 @@
 # Adapter proficiency benchmark — design
 
 Date: 2026-08-28
-Base branch: `feat/resilient-seam` (worktree `adapter-bench`, branch `feat/adapter-bench`)
+Base branch: `feat/resilient-seam` (worktree `source-bench`, branch `feat/source-bench`)
 
 ## Goal
 
@@ -44,9 +44,10 @@ seam, on an identical basis, so transport-vs-in-process is the only variable.
 
 ## Architecture
 
-New crate `live-tests/adapter-bench` (binary + `Containerfile`), added to workspace
+New crate `live-tests/source-bench` (binary + `Containerfile`), added to workspace
 `members` (not `default-members`, matching the live-test convention so normal builds
-skip it).
+skip it). Named for what's under test — the **source-port implementations** over the
+validator — not the incidental adapter role.
 
 - **Config/CLI:** adapter selection (`rpc` | `readstate` | `both`), op set, region
   definitions (start height + count per region), concurrency levels, RPC URL, RocksDB

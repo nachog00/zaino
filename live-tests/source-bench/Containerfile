@@ -1,0 +1,36 @@
+# syntax=docker/dockerfile:1.4
+#
+# Builds the source-bench binary from the workspace and stages it on a slim
+# runtime. Built in-cluster by BuildKit with the repo as context
+# (context=github.com/zingolabs/zaino#<ref>, filename=live-tests/source-bench/Containerfile).
+#
+# Toolchain mirrors live-tests/test_environment/Containerfile's zebra builder:
+# clang+cmake+pkg-config for the vendored rocksdb (via zebra-state), protobuf
+# for the proto-adjacent crates. Rust base matches rust-toolchain.toml (1.96.0).
+
+FROM docker.io/library/rust:1.96.0-trixie AS builder
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    clang \
+    cmake \
+    pkg-config \
+    protobuf-compiler \
+    libstdc++6 \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /build
+COPY . .
+# Build only the bench crate (members-only; not in default-members).
+RUN cargo build --release -p source-bench \
+    && cp target/release/source-bench /tmp/source-bench
+
+FROM docker.io/library/debian:trixie-slim AS runtime
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ca-certificates \
+    libstdc++6 \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY --from=builder /tmp/source-bench /usr/local/bin/source-bench
+
+ENTRYPOINT ["/usr/local/bin/source-bench"]

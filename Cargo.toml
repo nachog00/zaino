@@ -26,6 +26,10 @@ members = [
     "live-tests/zaino-testutils",
     "live-tests/clientless",
     "live-tests/e2e",
+    # Source-port proficiency benchmark (RPC vs ReadState). Members-only, like
+    # the other live-test crates: excluded from default-members so a bare
+    # `cargo`/`cargo nextest` skips it; build with `-p source-bench`.
+    "live-tests/source-bench",
 ]
 # `container-test` runs a bare `cargo nextest run`, which operates on
 # default-members — so the heavy live-test crates are built and tested only
