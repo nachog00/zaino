@@ -156,7 +156,12 @@ impl zaino_source::OneShotGetPreIndexCompactBlock for ZebraReadStateAdapter {
         // through the domain `Block`, exactly as the RPC adapter does.
         use zaino_source::OneShotGetBlock;
         let block = self.get_block(height).await?;
-        Ok(zaino_primitives::types::PreIndexCompactBlock::from(&block))
+        #[cfg(feature = "tracing")]
+        let ts = std::time::Instant::now();
+        let compact = zaino_primitives::types::PreIndexCompactBlock::from(&block);
+        #[cfg(feature = "tracing")]
+        tracing::trace!(target: "source::stage", stage = "strip", micros = ts.elapsed().as_micros() as u64);
+        Ok(compact)
     }
 }
 
@@ -191,10 +196,17 @@ impl zaino_source::OneShotGetBlock for ZebraReadStateAdapter {
         let zebra_height = zebra_chain::block::Height(u32::from(height));
         let request = ReadRequest::Block(zebra_height.into());
 
+        // Per-stage timing (feature-gated; zero cost when `tracing` is off).
+        // `read` is opaque here — the on-disk deserialize happens inside the
+        // linked-in zebra-state and can't be split without instrumenting it.
+        #[cfg(feature = "tracing")]
+        let t0 = std::time::Instant::now();
         let response =
             self.state.clone().oneshot(request).await.map_err(|e| {
                 FetchError::new(FailureMode::Connection, format!("state service: {e}"))
             })?;
+        #[cfg(feature = "tracing")]
+        let t1 = std::time::Instant::now();
 
         match response {
             ReadResponse::Block(Some(arc_block)) => {
@@ -208,8 +220,15 @@ impl zaino_source::OneShotGetBlock for ZebraReadStateAdapter {
                     orchard_tree_size: 0,
                     ironwood_tree_size: 0,
                 };
-                zaino_convert_zebra::block_from_zebra(&arc_block, chain_metadata)
-                    .map_err(|e| FetchError::new(FailureMode::Parse, e.to_string()).into())
+                let block = zaino_convert_zebra::block_from_zebra(&arc_block, chain_metadata)
+                    .map_err(|e| FetchError::new(FailureMode::Parse, e.to_string()))?;
+                #[cfg(feature = "tracing")]
+                {
+                    let t2 = std::time::Instant::now();
+                    tracing::trace!(target: "source::stage", stage = "read", micros = (t1 - t0).as_micros() as u64);
+                    tracing::trace!(target: "source::stage", stage = "convert", micros = (t2 - t1).as_micros() as u64);
+                }
+                Ok(block)
             }
             ReadResponse::Block(None) => {
                 Err(QueryError::Domain(GetBlockError::HeightNotFound(height)))

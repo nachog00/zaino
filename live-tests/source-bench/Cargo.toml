@@ -19,8 +19,8 @@ path = "src/main.rs"
 zaino-source = { workspace = true }
 zaino-primitives = { workspace = true }
 zaino-rpc = { workspace = true }
-zaino-source-zebra-rpc = { workspace = true }
-zaino-source-zebra-readstate = { workspace = true }
+zaino-source-zebra-rpc = { workspace = true, features = ["tracing"] }
+zaino-source-zebra-readstate = { workspace = true, features = ["tracing"] }
 zebra-chain = { workspace = true }
 
 tokio = { workspace = true, features = ["full"] }

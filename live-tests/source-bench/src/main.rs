@@ -21,15 +21,21 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+use std::collections::HashMap;
+use std::sync::Mutex;
+
 use anyhow::{Context, Result};
 use clap::Parser;
 use futures::stream::{self, StreamExt};
 use hdrhistogram::Histogram;
 use tokio::task::JoinError;
-use tracing::{info, warn};
-use tracing_subscriber::EnvFilter;
+use tracing::field::{Field, Visit};
+use tracing::{info, warn, Event, Subscriber};
+use tracing_subscriber::filter::{EnvFilter, LevelFilter, Targets};
+use tracing_subscriber::layer::Context as LayerContext;
+use tracing_subscriber::prelude::*;
+use tracing_subscriber::Layer;
 
-use serde_json::Value;
 use zaino_primitives::types::{BlockHash, Height, ShieldedPool, TransactionId};
 use zaino_rpc::{RpcClient, RpcClientConfig};
 use zaino_source::{
@@ -39,7 +45,6 @@ use zaino_source::{
 use zaino_source_zebra_readstate::ZebraReadStateAdapter;
 use zaino_source_zebra_rpc::ZebraRpcAdapter;
 use zebra_chain::parameters::Network;
-use zebra_chain::serialization::ZcashDeserialize;
 
 use report::CellStats;
 
@@ -96,8 +101,8 @@ struct Cli {
     subtree_pool: String,
 
     /// Zebra Prometheus metrics URL (port 8080). Scraped around each `rpcprofile`
-    /// sweep to split `prof_net` into network-RTT vs zebra-handler (`prof_zebra`).
-    /// Empty to disable.
+    /// sweep to split the `prof_fetch` stage into network vs zebra-handler
+    /// (`prof_zebra`). Empty to disable.
     #[arg(
         long,
         default_value = "http://zebra.golden-zebra-state.svc.cluster.local:8080/"
@@ -109,8 +114,10 @@ struct Cli {
     concurrency: String,
 
     /// Comma-separated ops: any of `compact`, `rawblock`, `rpcprofile`, `tip`,
-    /// `treestate`, `transaction`, `subtreeroots`. `rpcprofile` (RPC-only) emits a
-    /// directly-measured per-stage waterfall (`prof_net`/`prof_hex`/`prof_deser`).
+    /// `treestate`, `transaction`, `subtreeroots`. `rpcprofile` drives the real
+    /// adapters' compact op and captures their instrumented stage events
+    /// (`prof_fetch`/`prof_hex`/`prof_deserialize`/`prof_convert`/`prof_strip` for
+    /// RPC; `prof_read`/`prof_convert`/`prof_strip` for ReadState).
     #[arg(
         long,
         default_value = "compact,rawblock,rpcprofile,tip,treestate,transaction,subtreeroots"
@@ -125,7 +132,7 @@ struct Cli {
 #[tokio::main]
 async fn main() -> Result<()> {
     let cli = Cli::parse();
-    init_tracing();
+    let stage_layer = init_tracing();
 
     let want_readstate = matches!(cli.adapter.as_str(), "both" | "readstate");
     let want_rpc = matches!(cli.adapter.as_str(), "both" | "rpc");
@@ -241,26 +248,49 @@ async fn main() -> Result<()> {
         run_source(c, "rpc", &ops, &workload, &concurrencies, &mut rows).await;
     }
 
-    // RPC-only staged profile: a directly-measured waterfall (transport /
-    // hex-decode / deserialize) over its own bare RpcClient, replacing the
-    // compact−rawblock differential with per-stage measurement.
-    if want_rpc && ops.iter().any(|o| o == "rpcprofile") {
-        let bare = Arc::new(
-            RpcClient::new(RpcClientConfig {
-                url: cli.rpc_url.clone(),
-                ..Default::default()
-            })
-            .context("build profile rpc client")?,
-        );
+    // Staged profile: drive the REAL adapters' compact op and capture their
+    // instrumented `source::stage` events in-process (no emulation). RPC also
+    // scrapes zebra's handler metric to split the `fetch` stage.
+    if ops.iter().any(|o| o == "rpcprofile") {
         let http = reqwest::Client::builder()
             .build()
             .context("build zebra metrics http client")?;
-        let zebra =
-            (!cli.zebra_metrics_url.is_empty()).then_some((&http, cli.zebra_metrics_url.as_str()));
-        info!(source = "rpc", zebra = %cli.zebra_metrics_url, "running staged block profile");
-        for (region, heights) in &workload.regions {
-            for &conc in &concurrencies {
-                sweep_profile(&bare, region, heights, conc, zebra, &mut rows).await;
+        if let Some(c) = &rs_client {
+            info!(source = "readstate", "running staged block profile");
+            for (region, heights) in &workload.regions {
+                for &conc in &concurrencies {
+                    sweep_profile(
+                        c,
+                        "readstate",
+                        &stage_layer,
+                        region,
+                        heights,
+                        conc,
+                        None,
+                        &mut rows,
+                    )
+                    .await;
+                }
+            }
+        }
+        if let Some(c) = &rpc_client {
+            let zebra = (!cli.zebra_metrics_url.is_empty())
+                .then_some((&http, cli.zebra_metrics_url.as_str()));
+            info!(source = "rpc", zebra = %cli.zebra_metrics_url, "running staged block profile");
+            for (region, heights) in &workload.regions {
+                for &conc in &concurrencies {
+                    sweep_profile(
+                        c,
+                        "rpc",
+                        &stage_layer,
+                        region,
+                        heights,
+                        conc,
+                        zebra,
+                        &mut rows,
+                    )
+                    .await;
+                }
             }
         }
     }
@@ -276,17 +306,89 @@ async fn main() -> Result<()> {
     Ok(())
 }
 
-/// Initialise JSON tracing to stdout so promtail → Loki → Grafana picks up each
-/// event as structured fields. Override verbosity with `RUST_LOG`.
-fn init_tracing() {
-    let filter =
+/// Initialise tracing and return the stage-capture layer handle.
+///
+/// Two composed layers, each with its own filter: a JSON fmt layer (our `info`
+/// logs → stdout → Loki/Grafana), and a [`StageLayer`] that captures the
+/// adapters' `source::stage` TRACE events in-process for profiling. The fmt
+/// filter excludes the stage events so they don't flood the logs.
+fn init_tracing() -> StageLayer {
+    let fmt_filter =
         EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("source_bench=info"));
-    tracing_subscriber::fmt()
+    let fmt_layer = tracing_subscriber::fmt::layer()
         .json()
-        .with_env_filter(filter)
         .with_current_span(false)
         .with_span_list(false)
+        .with_filter(fmt_filter);
+
+    let stage_layer = StageLayer::default();
+    let handle = stage_layer.clone();
+    let stage_filter = Targets::new().with_target("source::stage", LevelFilter::TRACE);
+
+    tracing_subscriber::registry()
+        .with(fmt_layer)
+        .with(stage_layer.with_filter(stage_filter))
         .init();
+    handle
+}
+
+/// Captures the adapters' `source::stage` events (each carrying `stage` and
+/// `micros` fields) into a histogram per stage name. Reset before a profile
+/// sweep and drained after, so the histograms hold exactly that sweep's stages.
+#[derive(Clone, Default)]
+struct StageLayer {
+    hists: std::sync::Arc<Mutex<HashMap<String, Histogram<u64>>>>,
+}
+
+impl StageLayer {
+    fn reset(&self) {
+        if let Ok(mut h) = self.hists.lock() {
+            h.clear();
+        }
+    }
+
+    fn take(&self) -> HashMap<String, Histogram<u64>> {
+        match self.hists.lock() {
+            Ok(mut h) => std::mem::take(&mut *h),
+            Err(_) => HashMap::new(),
+        }
+    }
+}
+
+/// Field visitor pulling `stage` (str) and `micros` (u64) off a stage event.
+#[derive(Default)]
+struct StageVisit {
+    stage: Option<String>,
+    micros: Option<u64>,
+}
+
+impl Visit for StageVisit {
+    fn record_u64(&mut self, field: &Field, value: u64) {
+        if field.name() == "micros" {
+            self.micros = Some(value);
+        }
+    }
+    fn record_str(&mut self, field: &Field, value: &str) {
+        if field.name() == "stage" {
+            self.stage = Some(value.to_string());
+        }
+    }
+    fn record_debug(&mut self, _field: &Field, _value: &dyn std::fmt::Debug) {}
+}
+
+impl<S: Subscriber> Layer<S> for StageLayer {
+    fn on_event(&self, event: &Event<'_>, _ctx: LayerContext<'_, S>) {
+        let mut v = StageVisit::default();
+        event.record(&mut v);
+        if let (Some(stage), Some(micros)) = (v.stage, v.micros) {
+            if let Ok(mut map) = self.hists.lock() {
+                let hist = map.entry(stage).or_insert_with(|| {
+                    Histogram::<u64>::new(3).expect("hdrhistogram sigfig 3 is in range")
+                });
+                let _ = hist.record(micros);
+            }
+        }
+    }
 }
 
 /// Everything a source needs to be swept, built once and shared by both sources
@@ -408,145 +510,74 @@ async fn run_source<V>(
     }
 }
 
-/// Per-call staged timings for the RPC block path — measured directly, so no
-/// cross-sweep subtraction is needed to attribute the RPC cost.
-struct StageTimes {
-    /// `getblock` round-trip: network RTT + zebra read+serialize.
-    net: Duration,
-    /// Hex-decode of the response string.
-    hex: Duration,
-    /// Zcash consensus-deserialize into a typed block.
-    deser: Duration,
-    /// Whether the whole staged path succeeded.
-    ok: bool,
-}
-
-/// Time one RPC `getblock` v0 call split into transport / hex-decode /
-/// deserialize, mirroring the adapter's steps (`parse_raw_block` = `as_str` +
-/// `hex::decode`, then `zcash_deserialize`). Each stage of one physical call is
-/// measured, so the profile is a true waterfall, not a differential estimate.
-async fn profile_call(rpc: Arc<RpcClient>, height: Height) -> StageTimes {
-    let params = vec![
-        Value::String(u32::from(height).to_string()),
-        Value::Number(0.into()),
-    ];
-    let t0 = Instant::now();
-    let value = match rpc.call("getblock", params).await {
-        Ok(v) => v,
-        Err(_) => {
-            return StageTimes {
-                net: t0.elapsed(),
-                hex: Duration::ZERO,
-                deser: Duration::ZERO,
-                ok: false,
-            }
-        }
-    };
-    let t1 = Instant::now();
-    let bytes = match value.as_str().and_then(|s| hex::decode(s).ok()) {
-        Some(b) => b,
-        None => {
-            return StageTimes {
-                net: t1 - t0,
-                hex: t1.elapsed(),
-                deser: Duration::ZERO,
-                ok: false,
-            }
-        }
-    };
-    let t2 = Instant::now();
-    let ok = <zebra_chain::block::Block as ZcashDeserialize>::zcash_deserialize(&bytes[..]).is_ok();
-    let t3 = Instant::now();
-    StageTimes {
-        net: t1 - t0,
-        hex: t2 - t1,
-        deser: t3 - t2,
-        ok,
-    }
-}
-
-/// Sweep the staged RPC profile over `heights`, recording each stage into its
-/// own histogram, then emit one cell per stage (`prof_net` / `prof_hex` /
-/// `prof_deser`).
-async fn sweep_profile(
-    rpc: &Arc<RpcClient>,
+/// Profile the REAL adapter's compact-block path: drive
+/// `get_pre_index_compact_block` over `heights` while the [`StageLayer`]
+/// captures the adapter's instrumented `source::stage` events, then emit one
+/// cell per stage (`prof_<stage>`). No emulation — the numbers come straight
+/// from the adapter. For RPC, also scrape zebra's handler metric to split the
+/// `fetch` stage into zebra-handler vs network (`prof_zebra`).
+#[allow(clippy::too_many_arguments)]
+async fn sweep_profile<V>(
+    client: &Arc<ValidatorClient<V>>,
+    source: &str,
+    layer: &StageLayer,
     region: &str,
     heights: &[Height],
     concurrency: usize,
     zebra: Option<(&reqwest::Client, &str)>,
     rows: &mut Vec<CellStats>,
-) {
+) where
+    V: Send + Sync + 'static,
+    ValidatorClient<V>: GetPreIndexCompactBlock,
+{
     // Snapshot zebra's cumulative getblock handler (sum,count) before the sweep;
     // the delta across the sweep is the windowed mean handler time for exactly
-    // these calls (our serial Job is the dominant getblock client).
+    // these calls (the target validator's getblock counter is unshared).
     let before = match zebra {
         Some((c, u)) => scrape_zebra_getblock(c, u).await,
         None => None,
     };
 
-    let start = Instant::now();
-    let mut hn = Histogram::<u64>::new(3).expect("hdrhistogram sigfig 3 is in range");
-    let mut hh = Histogram::<u64>::new(3).expect("hdrhistogram sigfig 3 is in range");
-    let mut hd = Histogram::<u64>::new(3).expect("hdrhistogram sigfig 3 is in range");
-    let mut errors = 0u64;
-    let s = stream::iter(heights.iter().copied())
-        .map(|height| {
-            let r = rpc.clone();
-            tokio::spawn(async move { profile_call(r, height).await })
-        })
-        .buffer_unordered(concurrency);
-    let mut s = Box::pin(s);
-    while let Some(joined) = s.next().await {
-        match joined {
-            Ok(st) if st.ok => {
-                let _ = hn.record(st.net.as_micros() as u64);
-                let _ = hh.record(st.hex.as_micros() as u64);
-                let _ = hd.record(st.deser.as_micros() as u64);
-            }
-            _ => errors += 1,
-        }
-    }
-    let wall = start.elapsed().as_secs_f64();
-    push_cell(
-        rows,
-        "rpc",
-        "prof_net",
-        region,
-        concurrency,
-        &hn,
-        errors,
-        wall,
-    );
-    push_cell(
-        rows,
-        "rpc",
-        "prof_hex",
-        region,
-        concurrency,
-        &hh,
-        errors,
-        wall,
-    );
-    push_cell(
-        rows,
-        "rpc",
-        "prof_deser",
-        region,
-        concurrency,
-        &hd,
-        errors,
-        wall,
-    );
+    layer.reset();
+    let (_total, errors, wall) = drive(heights.to_vec(), concurrency, |height| {
+        let c = client.clone();
+        async move { c.get_pre_index_compact_block(height).await.is_ok() }
+    })
+    .await;
 
-    // zebra-handler mean over exactly this sweep's getblock calls; splits
-    // prof_net into zebra-handler (this) + network-RTT (the remainder).
+    // Per-stage histograms captured from the adapter during the sweep.
+    for (stage, hist) in &layer.take() {
+        push_cell(
+            rows,
+            source,
+            &format!("prof_{stage}"),
+            region,
+            concurrency,
+            hist,
+            errors,
+            wall,
+        );
+    }
+
+    // zebra-handler mean over exactly this sweep's getblock calls; splits the
+    // `fetch` stage into zebra-handler (this) + network (the remainder). Compared
+    // mean-to-mean against the `fetch` stage in the report.
     if let (Some((c, u)), Some((s0, n0))) = (zebra, before) {
         if let Some((s1, n1)) = scrape_zebra_getblock(c, u).await {
             if n1 > n0 {
                 let mean_us = ((s1 - s0) / ((n1 - n0) as f64) * 1e6) as u64;
                 let mut hz = Histogram::<u64>::new(3).expect("hdrhistogram sigfig 3 is in range");
                 let _ = hz.record(mean_us);
-                push_cell(rows, "rpc", "prof_zebra", region, concurrency, &hz, 0, wall);
+                push_cell(
+                    rows,
+                    source,
+                    "prof_zebra",
+                    region,
+                    concurrency,
+                    &hz,
+                    0,
+                    wall,
+                );
             }
         }
     }

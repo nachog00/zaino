@@ -199,18 +199,29 @@ impl zaino_source::OneShotGetBlock for ZebraRpcAdapter {
             serde_json::Value::String(u32::from(height).to_string()),
             serde_json::Value::Number(0.into()),
         ];
+        // Per-stage timing (feature-gated; zero cost when `tracing` is off) —
+        // fetch / hex-decode / deserialize / convert are emitted as
+        // `target: "source::stage"` events for in-process profiling.
+        #[cfg(feature = "tracing")]
+        let t0 = std::time::Instant::now();
         let value =
             self.rpc.call("getblock", params).await.map_err(|error| {
                 absent_or_fetch(error, || GetBlockError::HeightNotFound(height))
             })?;
+        #[cfg(feature = "tracing")]
+        let t1 = std::time::Instant::now();
 
         // Hex decode.
         let raw_bytes = parse::parse_raw_block(&value).map_err(from_parse)?;
+        #[cfg(feature = "tracing")]
+        let t2 = std::time::Instant::now();
 
         // Deserialize via zebra-chain.
         let zebra_block: zebra_chain::block::Block = raw_bytes
             .zcash_deserialize_into()
             .map_err(|e| from_parse(parse::ParseError::Deserialize(e.to_string())))?;
+        #[cfg(feature = "tracing")]
+        let t3 = std::time::Instant::now();
 
         // Cumulative tree sizes are indexed state, not present in the block
         // bytes, so they are zero here and populated by the caller that tracks
@@ -223,8 +234,17 @@ impl zaino_source::OneShotGetBlock for ZebraRpcAdapter {
             ironwood_tree_size: 0,
         };
 
-        zaino_convert_zebra::block_from_zebra(&zebra_block, chain_metadata)
-            .map_err(|e| FetchError::new(FailureMode::Parse, e.to_string()).into())
+        let block = zaino_convert_zebra::block_from_zebra(&zebra_block, chain_metadata)
+            .map_err(|e| FetchError::new(FailureMode::Parse, e.to_string()))?;
+        #[cfg(feature = "tracing")]
+        {
+            let t4 = std::time::Instant::now();
+            tracing::trace!(target: "source::stage", stage = "fetch", micros = (t1 - t0).as_micros() as u64);
+            tracing::trace!(target: "source::stage", stage = "hex", micros = (t2 - t1).as_micros() as u64);
+            tracing::trace!(target: "source::stage", stage = "deserialize", micros = (t3 - t2).as_micros() as u64);
+            tracing::trace!(target: "source::stage", stage = "convert", micros = (t4 - t3).as_micros() as u64);
+        }
+        Ok(block)
     }
 }
 
@@ -264,7 +284,12 @@ impl zaino_source::OneShotGetPreIndexCompactBlock for ZebraRpcAdapter {
         // &[u8]), we can skip the full zebra deserialize on this path too.
         use zaino_source::OneShotGetBlock;
         let block = self.get_block(height).await?;
-        Ok(zaino_primitives::types::PreIndexCompactBlock::from(&block))
+        #[cfg(feature = "tracing")]
+        let ts = std::time::Instant::now();
+        let compact = zaino_primitives::types::PreIndexCompactBlock::from(&block);
+        #[cfg(feature = "tracing")]
+        tracing::trace!(target: "source::stage", stage = "strip", micros = ts.elapsed().as_micros() as u64);
+        Ok(compact)
     }
 }
 
