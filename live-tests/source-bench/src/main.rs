@@ -32,8 +32,8 @@ use tracing_subscriber::EnvFilter;
 use zaino_primitives::types::{BlockHash, Height, ShieldedPool, TransactionId};
 use zaino_rpc::{RpcClient, RpcClientConfig};
 use zaino_source::{
-    GetChainTip, GetPreIndexCompactBlock, GetSubtreeRoots, GetTransaction, GetTreestate,
-    RetryPolicy, ValidatorClient,
+    GetChainTip, GetPreIndexCompactBlock, GetRawBlock, GetSubtreeRoots, GetTransaction,
+    GetTreestate, RetryPolicy, ValidatorClient,
 };
 use zaino_source_zebra_readstate::ZebraReadStateAdapter;
 use zaino_source_zebra_rpc::ZebraRpcAdapter;
@@ -97,8 +97,13 @@ struct Cli {
     #[arg(long, default_value = "1,2,4,8,16,32,64")]
     concurrency: String,
 
-    /// Comma-separated ops: any of `compact`, `tip`, `treestate`, `transaction`, `subtreeroots`.
-    #[arg(long, default_value = "compact,tip,treestate,transaction,subtreeroots")]
+    /// Comma-separated ops: any of `compact`, `rawblock`, `tip`, `treestate`,
+    /// `transaction`, `subtreeroots`. `rawblock` is the deserialize-free block fetch —
+    /// pair it with `compact` to isolate zaino-side decode cost.
+    #[arg(
+        long,
+        default_value = "compact,rawblock,tip,treestate,transaction,subtreeroots"
+    )]
     ops: String,
 
     /// Heights to cross-check between sources before benchmarking (both mode only).
@@ -274,8 +279,12 @@ async fn run_source<V>(
     rows: &mut Vec<CellStats>,
 ) where
     V: Send + Sync + 'static,
-    ValidatorClient<V>:
-        GetPreIndexCompactBlock + GetChainTip + GetTreestate + GetTransaction + GetSubtreeRoots,
+    ValidatorClient<V>: GetPreIndexCompactBlock
+        + GetRawBlock
+        + GetChainTip
+        + GetTreestate
+        + GetTransaction
+        + GetSubtreeRoots,
 {
     for op in ops {
         match op.as_str() {
@@ -288,6 +297,21 @@ async fn run_source<V>(
                         })
                         .await;
                         push_cell(rows, source, "compact", region, conc, &h, e, w);
+                    }
+                }
+            }
+            // Same fetch as `compact` up to consensus-deserialize: RPC stops at
+            // hex-decode, ReadState reads typed then re-serializes. So on the RPC
+            // side, compact − rawblock isolates zaino's consensus-deserialize cost.
+            "rawblock" => {
+                for (region, heights) in &workload.regions {
+                    for &conc in concurrencies {
+                        let (h, e, w) = drive(heights.clone(), conc, |height| {
+                            let c = client.clone();
+                            async move { c.get_raw_block(height).await.is_ok() }
+                        })
+                        .await;
+                        push_cell(rows, source, "rawblock", region, conc, &h, e, w);
                     }
                 }
             }
