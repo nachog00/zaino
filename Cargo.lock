@@ -4549,6 +4549,7 @@ dependencies = [
  "clap",
  "futures",
  "hdrhistogram",
+ "hex",
  "serde",
  "serde_json",
  "tokio",

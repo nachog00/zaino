@@ -29,6 +29,7 @@ use tokio::task::JoinError;
 use tracing::{info, warn};
 use tracing_subscriber::EnvFilter;
 
+use serde_json::Value;
 use zaino_primitives::types::{BlockHash, Height, ShieldedPool, TransactionId};
 use zaino_rpc::{RpcClient, RpcClientConfig};
 use zaino_source::{
@@ -38,6 +39,7 @@ use zaino_source::{
 use zaino_source_zebra_readstate::ZebraReadStateAdapter;
 use zaino_source_zebra_rpc::ZebraRpcAdapter;
 use zebra_chain::parameters::Network;
+use zebra_chain::serialization::ZcashDeserialize;
 
 use report::CellStats;
 
@@ -97,12 +99,12 @@ struct Cli {
     #[arg(long, default_value = "1,2,4,8,16,32,64")]
     concurrency: String,
 
-    /// Comma-separated ops: any of `compact`, `rawblock`, `tip`, `treestate`,
-    /// `transaction`, `subtreeroots`. `rawblock` is the deserialize-free block fetch —
-    /// pair it with `compact` to isolate zaino-side decode cost.
+    /// Comma-separated ops: any of `compact`, `rawblock`, `rpcprofile`, `tip`,
+    /// `treestate`, `transaction`, `subtreeroots`. `rpcprofile` (RPC-only) emits a
+    /// directly-measured per-stage waterfall (`prof_net`/`prof_hex`/`prof_deser`).
     #[arg(
         long,
-        default_value = "compact,rawblock,tip,treestate,transaction,subtreeroots"
+        default_value = "compact,rawblock,rpcprofile,tip,treestate,transaction,subtreeroots"
     )]
     ops: String,
 
@@ -228,6 +230,25 @@ async fn main() -> Result<()> {
     if let Some(c) = &rpc_client {
         info!(source = "rpc", "running sweeps");
         run_source(c, "rpc", &ops, &workload, &concurrencies, &mut rows).await;
+    }
+
+    // RPC-only staged profile: a directly-measured waterfall (transport /
+    // hex-decode / deserialize) over its own bare RpcClient, replacing the
+    // compact−rawblock differential with per-stage measurement.
+    if want_rpc && ops.iter().any(|o| o == "rpcprofile") {
+        let bare = Arc::new(
+            RpcClient::new(RpcClientConfig {
+                url: cli.rpc_url.clone(),
+                ..Default::default()
+            })
+            .context("build profile rpc client")?,
+        );
+        info!(source = "rpc", "running staged block profile");
+        for (region, heights) in &workload.regions {
+            for &conc in &concurrencies {
+                sweep_profile(&bare, region, heights, conc, &mut rows).await;
+            }
+        }
     }
 
     // Machine-readable results block for one-shot extraction from the logs,
@@ -366,9 +387,133 @@ async fn run_source<V>(
                     push_cell(rows, source, "tip", "n/a", conc, &h, e, w);
                 }
             }
+            // RPC-only staged profile — handled separately in main, not here.
+            "rpcprofile" => {}
             other => warn!(op = other, "unknown op, skipping"),
         }
     }
+}
+
+/// Per-call staged timings for the RPC block path — measured directly, so no
+/// cross-sweep subtraction is needed to attribute the RPC cost.
+struct StageTimes {
+    /// `getblock` round-trip: network RTT + zebra read+serialize.
+    net: Duration,
+    /// Hex-decode of the response string.
+    hex: Duration,
+    /// Zcash consensus-deserialize into a typed block.
+    deser: Duration,
+    /// Whether the whole staged path succeeded.
+    ok: bool,
+}
+
+/// Time one RPC `getblock` v0 call split into transport / hex-decode /
+/// deserialize, mirroring the adapter's steps (`parse_raw_block` = `as_str` +
+/// `hex::decode`, then `zcash_deserialize`). Each stage of one physical call is
+/// measured, so the profile is a true waterfall, not a differential estimate.
+async fn profile_call(rpc: Arc<RpcClient>, height: Height) -> StageTimes {
+    let params = vec![
+        Value::String(u32::from(height).to_string()),
+        Value::Number(0.into()),
+    ];
+    let t0 = Instant::now();
+    let value = match rpc.call("getblock", params).await {
+        Ok(v) => v,
+        Err(_) => {
+            return StageTimes {
+                net: t0.elapsed(),
+                hex: Duration::ZERO,
+                deser: Duration::ZERO,
+                ok: false,
+            }
+        }
+    };
+    let t1 = Instant::now();
+    let bytes = match value.as_str().and_then(|s| hex::decode(s).ok()) {
+        Some(b) => b,
+        None => {
+            return StageTimes {
+                net: t1 - t0,
+                hex: t1.elapsed(),
+                deser: Duration::ZERO,
+                ok: false,
+            }
+        }
+    };
+    let t2 = Instant::now();
+    let ok = <zebra_chain::block::Block as ZcashDeserialize>::zcash_deserialize(&bytes[..]).is_ok();
+    let t3 = Instant::now();
+    StageTimes {
+        net: t1 - t0,
+        hex: t2 - t1,
+        deser: t3 - t2,
+        ok,
+    }
+}
+
+/// Sweep the staged RPC profile over `heights`, recording each stage into its
+/// own histogram, then emit one cell per stage (`prof_net` / `prof_hex` /
+/// `prof_deser`).
+async fn sweep_profile(
+    rpc: &Arc<RpcClient>,
+    region: &str,
+    heights: &[Height],
+    concurrency: usize,
+    rows: &mut Vec<CellStats>,
+) {
+    let start = Instant::now();
+    let mut hn = Histogram::<u64>::new(3).expect("hdrhistogram sigfig 3 is in range");
+    let mut hh = Histogram::<u64>::new(3).expect("hdrhistogram sigfig 3 is in range");
+    let mut hd = Histogram::<u64>::new(3).expect("hdrhistogram sigfig 3 is in range");
+    let mut errors = 0u64;
+    let s = stream::iter(heights.iter().copied())
+        .map(|height| {
+            let r = rpc.clone();
+            tokio::spawn(async move { profile_call(r, height).await })
+        })
+        .buffer_unordered(concurrency);
+    let mut s = Box::pin(s);
+    while let Some(joined) = s.next().await {
+        match joined {
+            Ok(st) if st.ok => {
+                let _ = hn.record(st.net.as_micros() as u64);
+                let _ = hh.record(st.hex.as_micros() as u64);
+                let _ = hd.record(st.deser.as_micros() as u64);
+            }
+            _ => errors += 1,
+        }
+    }
+    let wall = start.elapsed().as_secs_f64();
+    push_cell(
+        rows,
+        "rpc",
+        "prof_net",
+        region,
+        concurrency,
+        &hn,
+        errors,
+        wall,
+    );
+    push_cell(
+        rows,
+        "rpc",
+        "prof_hex",
+        region,
+        concurrency,
+        &hh,
+        errors,
+        wall,
+    );
+    push_cell(
+        rows,
+        "rpc",
+        "prof_deser",
+        region,
+        concurrency,
+        &hd,
+        errors,
+        wall,
+    );
 }
 
 /// Build a cell record from a completed sweep, log it, and append it.
