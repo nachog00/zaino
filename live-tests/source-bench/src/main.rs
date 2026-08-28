@@ -95,6 +95,15 @@ struct Cli {
     #[arg(long, default_value = "sapling")]
     subtree_pool: String,
 
+    /// Zebra Prometheus metrics URL (port 8080). Scraped around each `rpcprofile`
+    /// sweep to split `prof_net` into network-RTT vs zebra-handler (`prof_zebra`).
+    /// Empty to disable.
+    #[arg(
+        long,
+        default_value = "http://zebra.golden-zebra-state.svc.cluster.local:8080/"
+    )]
+    zebra_metrics_url: String,
+
     /// Comma-separated in-flight concurrency levels.
     #[arg(long, default_value = "1,2,4,8,16,32,64")]
     concurrency: String,
@@ -243,10 +252,15 @@ async fn main() -> Result<()> {
             })
             .context("build profile rpc client")?,
         );
-        info!(source = "rpc", "running staged block profile");
+        let http = reqwest::Client::builder()
+            .build()
+            .context("build zebra metrics http client")?;
+        let zebra =
+            (!cli.zebra_metrics_url.is_empty()).then_some((&http, cli.zebra_metrics_url.as_str()));
+        info!(source = "rpc", zebra = %cli.zebra_metrics_url, "running staged block profile");
         for (region, heights) in &workload.regions {
             for &conc in &concurrencies {
-                sweep_profile(&bare, region, heights, conc, &mut rows).await;
+                sweep_profile(&bare, region, heights, conc, zebra, &mut rows).await;
             }
         }
     }
@@ -459,8 +473,17 @@ async fn sweep_profile(
     region: &str,
     heights: &[Height],
     concurrency: usize,
+    zebra: Option<(&reqwest::Client, &str)>,
     rows: &mut Vec<CellStats>,
 ) {
+    // Snapshot zebra's cumulative getblock handler (sum,count) before the sweep;
+    // the delta across the sweep is the windowed mean handler time for exactly
+    // these calls (our serial Job is the dominant getblock client).
+    let before = match zebra {
+        Some((c, u)) => scrape_zebra_getblock(c, u).await,
+        None => None,
+    };
+
     let start = Instant::now();
     let mut hn = Histogram::<u64>::new(3).expect("hdrhistogram sigfig 3 is in range");
     let mut hh = Histogram::<u64>::new(3).expect("hdrhistogram sigfig 3 is in range");
@@ -514,6 +537,39 @@ async fn sweep_profile(
         errors,
         wall,
     );
+
+    // zebra-handler mean over exactly this sweep's getblock calls; splits
+    // prof_net into zebra-handler (this) + network-RTT (the remainder).
+    if let (Some((c, u)), Some((s0, n0))) = (zebra, before) {
+        if let Some((s1, n1)) = scrape_zebra_getblock(c, u).await {
+            if n1 > n0 {
+                let mean_us = ((s1 - s0) / ((n1 - n0) as f64) * 1e6) as u64;
+                let mut hz = Histogram::<u64>::new(3).expect("hdrhistogram sigfig 3 is in range");
+                let _ = hz.record(mean_us);
+                push_cell(rows, "rpc", "prof_zebra", region, concurrency, &hz, 0, wall);
+            }
+        }
+    }
+}
+
+/// Scrape zebra's `/metrics` and return the cumulative
+/// `rpc_request_duration_seconds_{sum,count}` for `method="getblock"`.
+async fn scrape_zebra_getblock(client: &reqwest::Client, url: &str) -> Option<(f64, u64)> {
+    let body = client.get(url).send().await.ok()?.text().await.ok()?;
+    let mut sum = None;
+    let mut count = None;
+    for line in body.lines() {
+        if let Some(rest) =
+            line.strip_prefix("rpc_request_duration_seconds_sum{method=\"getblock\"}")
+        {
+            sum = rest.trim().parse::<f64>().ok();
+        } else if let Some(rest) =
+            line.strip_prefix("rpc_request_duration_seconds_count{method=\"getblock\"}")
+        {
+            count = rest.trim().parse::<f64>().ok().map(|f| f as u64);
+        }
+    }
+    Some((sum?, count?))
 }
 
 /// Build a cell record from a completed sweep, log it, and append it.

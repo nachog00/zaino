@@ -4550,6 +4550,7 @@ dependencies = [
  "futures",
  "hdrhistogram",
  "hex",
+ "reqwest 0.13.1",
  "serde",
  "serde_json",
  "tokio",

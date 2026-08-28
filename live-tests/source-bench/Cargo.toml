@@ -33,3 +33,4 @@ hdrhistogram = "7"
 tracing.workspace = true
 tracing-subscriber = { workspace = true, features = ["json", "env-filter"] }
 hex.workspace = true
+reqwest.workspace = true
