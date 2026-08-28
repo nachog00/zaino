@@ -31,6 +31,9 @@ pub(crate) struct CellStats {
     pub(crate) p90_us: u64,
     pub(crate) p99_us: u64,
     pub(crate) max_us: u64,
+    /// Per-call mean latency, microseconds. Needed for mean-to-mean comparison
+    /// against zebra's own (mean-only) handler metric.
+    pub(crate) mean_us: u64,
 }
 
 impl CellStats {
@@ -63,6 +66,7 @@ impl CellStats {
             p90_us: hist.value_at_quantile(0.90),
             p99_us: hist.value_at_quantile(0.99),
             max_us: hist.max(),
+            mean_us: hist.mean().round() as u64,
         }
     }
 }
