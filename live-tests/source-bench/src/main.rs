@@ -29,9 +29,12 @@ use tokio::task::JoinError;
 use tracing::{info, warn};
 use tracing_subscriber::EnvFilter;
 
-use zaino_primitives::types::{BlockHash, Height};
+use zaino_primitives::types::{BlockHash, Height, ShieldedPool, TransactionId};
 use zaino_rpc::{RpcClient, RpcClientConfig};
-use zaino_source::{GetChainTip, GetPreIndexCompactBlock, RetryPolicy, ValidatorClient};
+use zaino_source::{
+    GetChainTip, GetPreIndexCompactBlock, GetSubtreeRoots, GetTransaction, GetTreestate,
+    RetryPolicy, ValidatorClient,
+};
 use zaino_source_zebra_readstate::ZebraReadStateAdapter;
 use zaino_source_zebra_rpc::ZebraRpcAdapter;
 use zebra_chain::parameters::Network;
@@ -69,23 +72,36 @@ struct Cli {
     #[arg(long, default_value_t = 2_000)]
     region_recent_offset: u32,
 
-    /// Blocks sampled per region (contiguous from each region's start).
-    #[arg(long, default_value_t = 1_000)]
+    /// Blocks sampled per region (contiguous from each region's start). Raise for
+    /// a less noisy probe; drives the compact and treestate sweeps.
+    #[arg(long, default_value_t = 2_000)]
     blocks_per_region: u32,
 
     /// Chain-tip calls issued per concurrency level.
     #[arg(long, default_value_t = 2_000)]
     tip_iters: u32,
 
+    /// Transaction ids harvested + probed per region (transaction op).
+    #[arg(long, default_value_t = 2_000)]
+    tx_sample: usize,
+
+    /// Subtree start indices probed per concurrency level (subtreeroots op).
+    #[arg(long, default_value_t = 512)]
+    subtree_count: u16,
+
+    /// Shielded pool for the subtree probe: `sapling`, `orchard`, or `ironwood`.
+    #[arg(long, default_value = "sapling")]
+    subtree_pool: String,
+
     /// Comma-separated in-flight concurrency levels.
     #[arg(long, default_value = "1,2,4,8,16,32,64")]
     concurrency: String,
 
-    /// Comma-separated ops to run: any of `compact`, `tip`.
-    #[arg(long, default_value = "compact,tip")]
+    /// Comma-separated ops: any of `compact`, `tip`, `treestate`, `transaction`, `subtreeroots`.
+    #[arg(long, default_value = "compact,tip,treestate,transaction,subtreeroots")]
     ops: String,
 
-    /// Heights to cross-check between adapters before benchmarking (both mode only).
+    /// Heights to cross-check between sources before benchmarking (both mode only).
     #[arg(long, default_value_t = 32)]
     parity_sample: usize,
 }
@@ -177,33 +193,36 @@ async fn main() -> Result<()> {
         parity_check(rs, rp, &regions, cli.parity_sample).await;
     }
 
+    // Build the shared workload once so both sources are driven over identical
+    // inputs. The txid corpus is only harvested if the transaction op is selected.
+    let tx_corpus = if ops.iter().any(|o| o == "transaction") {
+        match (&rs_client, &rpc_client) {
+            (Some(c), _) => collect_txids(c, &regions, cli.tx_sample).await,
+            (None, Some(c)) => collect_txids(c, &regions, cli.tx_sample).await,
+            (None, None) => Vec::new(),
+        }
+    } else {
+        Vec::new()
+    };
+    let subtree_pool = parse_pool(&cli.subtree_pool)?;
+    let subtree_indices: Vec<u16> = (0..cli.subtree_count).collect();
+    let workload = Workload {
+        regions,
+        tx_corpus,
+        subtree_indices,
+        subtree_pool,
+        tip_iters: cli.tip_iters,
+    };
+
     // Series execution: fully exhaust one source before touching the next.
     let mut rows: Vec<CellStats> = Vec::new();
     if let Some(c) = &rs_client {
         info!(source = "readstate", "running sweeps");
-        run_adapter(
-            c,
-            "readstate",
-            &ops,
-            &regions,
-            cli.tip_iters,
-            &concurrencies,
-            &mut rows,
-        )
-        .await;
+        run_source(c, "readstate", &ops, &workload, &concurrencies, &mut rows).await;
     }
     if let Some(c) = &rpc_client {
         info!(source = "rpc", "running sweeps");
-        run_adapter(
-            c,
-            "rpc",
-            &ops,
-            &regions,
-            cli.tip_iters,
-            &concurrencies,
-            &mut rows,
-        )
-        .await;
+        run_source(c, "rpc", &ops, &workload, &concurrencies, &mut rows).await;
     }
 
     // Machine-readable results block for one-shot extraction from the logs,
@@ -230,35 +249,97 @@ fn init_tracing() {
         .init();
 }
 
-/// Run every selected op × region × concurrency for one adapter, appending rows.
-async fn run_adapter<V>(
-    client: &Arc<ValidatorClient<V>>,
-    adapter: &str,
-    ops: &[String],
-    regions: &[(String, Vec<Height>)],
+/// Everything a source needs to be swept, built once and shared by both sources
+/// so the two are driven over identical inputs.
+struct Workload {
+    /// Region name → block heights (compact, treestate).
+    regions: Vec<(String, Vec<Height>)>,
+    /// Region name → harvested transaction ids (transaction).
+    tx_corpus: Vec<(String, Vec<TransactionId>)>,
+    /// Subtree start indices to probe (subtreeroots).
+    subtree_indices: Vec<u16>,
+    /// Pool the subtree probe targets.
+    subtree_pool: ShieldedPool,
+    /// Chain-tip calls per concurrency level.
     tip_iters: u32,
+}
+
+/// Run every selected op × region × concurrency for one source, appending rows.
+async fn run_source<V>(
+    client: &Arc<ValidatorClient<V>>,
+    source: &str,
+    ops: &[String],
+    workload: &Workload,
     concurrencies: &[usize],
     rows: &mut Vec<CellStats>,
 ) where
     V: Send + Sync + 'static,
-    ValidatorClient<V>: GetPreIndexCompactBlock + GetChainTip,
+    ValidatorClient<V>:
+        GetPreIndexCompactBlock + GetChainTip + GetTreestate + GetTransaction + GetSubtreeRoots,
 {
     for op in ops {
         match op.as_str() {
             "compact" => {
-                for (region_name, heights) in regions {
+                for (region, heights) in &workload.regions {
                     for &conc in concurrencies {
-                        let cell = sweep_compact(client, adapter, region_name, heights, conc).await;
-                        log_cell(&cell);
-                        rows.push(cell);
+                        let (h, e, w) = drive(heights.clone(), conc, |height| {
+                            let c = client.clone();
+                            async move { c.get_pre_index_compact_block(height).await.is_ok() }
+                        })
+                        .await;
+                        push_cell(rows, source, "compact", region, conc, &h, e, w);
                     }
+                }
+            }
+            "treestate" => {
+                for (region, heights) in &workload.regions {
+                    for &conc in concurrencies {
+                        let (h, e, w) = drive(heights.clone(), conc, |height| {
+                            let c = client.clone();
+                            async move { c.get_treestate(height).await.is_ok() }
+                        })
+                        .await;
+                        push_cell(rows, source, "treestate", region, conc, &h, e, w);
+                    }
+                }
+            }
+            "transaction" => {
+                for (region, txids) in &workload.tx_corpus {
+                    if txids.is_empty() {
+                        warn!(region = %region, "no txids harvested, skipping transaction sweep");
+                        continue;
+                    }
+                    for &conc in concurrencies {
+                        let (h, e, w) = drive(txids.clone(), conc, |txid| {
+                            let c = client.clone();
+                            async move { c.get_transaction(txid).await.is_ok() }
+                        })
+                        .await;
+                        push_cell(rows, source, "transaction", region, conc, &h, e, w);
+                    }
+                }
+            }
+            "subtreeroots" => {
+                let pool = workload.subtree_pool;
+                let region = pool_label(pool);
+                for &conc in concurrencies {
+                    let (h, e, w) = drive(workload.subtree_indices.clone(), conc, |idx| {
+                        let c = client.clone();
+                        async move { c.get_subtree_roots(pool, idx, Some(1)).await.is_ok() }
+                    })
+                    .await;
+                    push_cell(rows, source, "subtreeroots", region, conc, &h, e, w);
                 }
             }
             "tip" => {
                 for &conc in concurrencies {
-                    let cell = sweep_tip(client, adapter, tip_iters, conc).await;
-                    log_cell(&cell);
-                    rows.push(cell);
+                    let items: Vec<u32> = (0..workload.tip_iters).collect();
+                    let (h, e, w) = drive(items, conc, |_| {
+                        let c = client.clone();
+                        async move { c.get_chain_tip().await.is_ok() }
+                    })
+                    .await;
+                    push_cell(rows, source, "tip", "n/a", conc, &h, e, w);
                 }
             }
             other => warn!(op = other, "unknown op, skipping"),
@@ -266,61 +347,99 @@ async fn run_adapter<V>(
     }
 }
 
-/// Sweep compact-block fetch over `heights` at a fixed concurrency.
-async fn sweep_compact<V>(
-    client: &Arc<ValidatorClient<V>>,
-    adapter: &str,
+/// Build a cell record from a completed sweep, log it, and append it.
+#[allow(clippy::too_many_arguments)]
+fn push_cell(
+    rows: &mut Vec<CellStats>,
+    source: &str,
+    op: &str,
     region: &str,
-    heights: &[Height],
     concurrency: usize,
-) -> CellStats
+    hist: &Histogram<u64>,
+    errors: u64,
+    wall_secs: f64,
+) {
+    let cell = CellStats::from_cell(source, op, region, concurrency, hist, errors, wall_secs);
+    log_cell(&cell);
+    rows.push(cell);
+}
+
+/// Human label for a shielded pool.
+fn pool_label(pool: ShieldedPool) -> &'static str {
+    match pool {
+        ShieldedPool::Sapling => "sapling",
+        ShieldedPool::Orchard => "orchard",
+        ShieldedPool::Ironwood => "ironwood",
+    }
+}
+
+/// Parse the `--subtree-pool` flag.
+fn parse_pool(s: &str) -> Result<ShieldedPool> {
+    match s.to_ascii_lowercase().as_str() {
+        "sapling" => Ok(ShieldedPool::Sapling),
+        "orchard" => Ok(ShieldedPool::Orchard),
+        "ironwood" => Ok(ShieldedPool::Ironwood),
+        other => anyhow::bail!("unknown pool '{other}' (sapling|orchard|ironwood)"),
+    }
+}
+
+/// Drive `items` through `make` at a fixed in-flight `concurrency`, timing each
+/// call. Each item is spawned so calls land on worker threads — real parallelism
+/// for the CPU-bound in-process ReadState reads as well as the IO-bound RPC.
+/// Returns the latency histogram, error count, and wall-clock seconds.
+async fn drive<T, Fut, F>(items: Vec<T>, concurrency: usize, make: F) -> (Histogram<u64>, u64, f64)
+where
+    T: Send + 'static,
+    F: Fn(T) -> Fut,
+    Fut: std::future::Future<Output = bool> + Send + 'static,
+{
+    let start = Instant::now();
+    let s = stream::iter(items)
+        .map(|item| {
+            let fut = make(item);
+            tokio::spawn(async move {
+                let t = Instant::now();
+                let ok = fut.await;
+                (t.elapsed(), ok)
+            })
+        })
+        .buffer_unordered(concurrency);
+    let (hist, errors) = collect(Box::pin(s)).await;
+    (hist, errors, start.elapsed().as_secs_f64())
+}
+
+/// Harvest up to `cap` transaction ids per region by scanning that region's
+/// blocks in order until the cap is met. Built once from one source and reused
+/// for both, so the transaction sweep drives an identical txid set on each.
+async fn collect_txids<V>(
+    client: &Arc<ValidatorClient<V>>,
+    regions: &[(String, Vec<Height>)],
+    cap: usize,
+) -> Vec<(String, Vec<TransactionId>)>
 where
     V: Send + Sync + 'static,
     ValidatorClient<V>: GetPreIndexCompactBlock,
 {
-    let start = Instant::now();
-    let s = stream::iter(heights.iter().copied())
-        .map(|height| {
-            let c = client.clone();
-            // spawn so calls land on worker threads — real parallelism for the
-            // CPU-bound in-process ReadState reads as well as the IO-bound RPC.
-            tokio::spawn(async move {
-                let t = Instant::now();
-                let ok = c.get_pre_index_compact_block(height).await.is_ok();
-                (t.elapsed(), ok)
-            })
-        })
-        .buffer_unordered(concurrency);
-    let (hist, errors) = collect(Box::pin(s)).await;
-    let wall = start.elapsed().as_secs_f64();
-    CellStats::from_cell(adapter, "compact", region, concurrency, &hist, errors, wall)
-}
-
-/// Sweep chain-tip `iters` times at a fixed concurrency.
-async fn sweep_tip<V>(
-    client: &Arc<ValidatorClient<V>>,
-    adapter: &str,
-    iters: u32,
-    concurrency: usize,
-) -> CellStats
-where
-    V: Send + Sync + 'static,
-    ValidatorClient<V>: GetChainTip,
-{
-    let start = Instant::now();
-    let s = stream::iter(0..iters)
-        .map(|_| {
-            let c = client.clone();
-            tokio::spawn(async move {
-                let t = Instant::now();
-                let ok = c.get_chain_tip().await.is_ok();
-                (t.elapsed(), ok)
-            })
-        })
-        .buffer_unordered(concurrency);
-    let (hist, errors) = collect(Box::pin(s)).await;
-    let wall = start.elapsed().as_secs_f64();
-    CellStats::from_cell(adapter, "tip", "n/a", concurrency, &hist, errors, wall)
+    let mut out = Vec::new();
+    for (region, heights) in regions {
+        let mut txids = Vec::new();
+        for &height in heights {
+            if txids.len() >= cap {
+                break;
+            }
+            if let Ok(block) = client.get_pre_index_compact_block(height).await {
+                for tx in block.transactions {
+                    txids.push(tx.txid);
+                    if txids.len() >= cap {
+                        break;
+                    }
+                }
+            }
+        }
+        info!(region = %region, txids = txids.len(), "harvested tx corpus");
+        out.push((region.clone(), txids));
+    }
+    out
 }
 
 /// Drain a stream of spawned timed calls into a latency histogram + error count.

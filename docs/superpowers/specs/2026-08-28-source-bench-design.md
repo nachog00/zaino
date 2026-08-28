@@ -28,14 +28,17 @@ seam, on an identical basis, so transport-vs-in-process is the only variable.
 
 ## Phase 1 scope (approved)
 
-- **Operations:** `GetPreIndexCompactBlock` (compact-block fetch — what sync consumes;
-  note neither adapter has a true compact read, both fetch whole blocks and strip, which
-  is what the indexer pays anyway) and `GetChainTip`. Both are in the both-adapters
-  intersection. Fast-follow ops (deferred): `GetTransaction`, `GetTreestate`,
-  `GetSubtreeRoots`.
+- **Operations (all in the both-sources intersection):** `GetPreIndexCompactBlock`
+  (compact-block fetch — what sync consumes; note neither source has a true compact read,
+  both fetch whole blocks and strip, which is what the indexer pays anyway), `GetChainTip`,
+  `GetTreestate` and `GetTransaction` (both region-indexed — treestate by height,
+  transaction over a txid corpus harvested once from the compact blocks and reused for
+  both sources), and `GetSubtreeRoots` (indexed by subtree start-index over a shielded
+  pool, its own axis — not region-based).
 - **Chain coverage:** three fixed sampled regions rather than the full ~2.9M sweep —
-  early/small blocks, sandblast-heavy (~1.7–1.9M), recent-near-tip. N blocks each
-  (default 1000), so region-dependence shows cheaply and runs in minutes.
+  early/small blocks, sandblast-heavy (~1.7–1.9M), recent-near-tip. Every probe size is a
+  CLI flag (`--blocks-per-region`, `--tip-iters`, `--tx-sample`, `--subtree-count`);
+  defaults sized to run in minutes, raise for a less noisy probe.
 - **Concurrency sweep:** 1, 2, 4, 8, 16, 32, 64 (loadgen found saturation ~64).
 - **Discipline:** adapters run **in series**, never concurrently — no cross-contamination.
 - **Measurement:** harness-side wall-clock only, identical instrumentation on both
