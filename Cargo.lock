@@ -6161,6 +6161,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "zaino-component"
+version = "0.1.0"
+dependencies = [
+ "thiserror 2.0.18",
+ "tokio",
+ "tokio-util",
+]
+
+[[package]]
 name = "zaino-convert-zebra"
 version = "0.1.0"
 dependencies = [
