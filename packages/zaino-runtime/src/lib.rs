@@ -29,4 +29,4 @@ pub use error::RuntimeError;
 pub use passthrough::{PassthroughError, PassthroughSource};
 pub use runtime::{Assembler, Runtime, RuntimeBuilder};
 pub use snapshot::RuntimeSnapshot;
-pub use supervisor::{supervise, supervise_step, SupervisionOutcome};
+pub use supervisor::{supervise, supervise_step, RecoveryPolicy, SupervisionOutcome};

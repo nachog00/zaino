@@ -1,71 +1,106 @@
-//! Supervising a component: observe its health, act on its lifecycle.
+//! Supervising a component: observe its health, act per policy.
 //!
-//! The minimal supervision policy — restart a component that has gone
-//! [`Health::Critical`] — expressed over the `zaino-component` ports. The
-//! component owns *how* it restarts ([`Managed`]); the supervisor owns *when*.
+//! Mechanism and policy are separate. The **mechanism** is wired: the supervisor
+//! can restart a component (via [`Managed`]) or escalate it to the runtime. The
+//! **policy** ([`RecoveryPolicy`]) decides which. For now the runtime uses
+//! [`RecoveryPolicy::EscalateAll`] — no restarts, every `Critical` bubbles
+//! straight up — but [`RecoveryPolicy::RestartOnCritical`] exists and is
+//! exercised, so turning recovery on later is a policy change, not new plumbing.
 //!
-//! Two entry points: [`supervise_step`] does one observe→act pass (for a caller
-//! that drives its own cadence); [`supervise`] runs a **reactive** loop that
-//! sleeps between transitions, waking on each status change via
-//! [`StatusWatch`] — no polling.
+//! [`Health::Recoverable`] already means "degraded but self-heals", so no policy
+//! acts on it; only `Critical` does.
 //!
-//! Intentionally small: DAG-ordered bringup and the validator readiness gate
-//! layer on top of this later.
+//! [`Managed`]: zaino_component::Managed
 
 use zaino_component::{Health, Managed, StatusSource, StatusWatch};
 
-/// What a supervision step did.
+/// How the supervisor responds to a `Critical` component.
+///
+/// The recovery *mechanism* is always present; this selects whether to use it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RecoveryPolicy {
+    /// No recovery: hand every `Critical` to the runtime (treated as fatal for
+    /// now). The current default.
+    EscalateAll,
+    /// Restart a `Critical` component in place. (Later: bounded by a retry
+    /// budget, then escalate on exhaustion.)
+    RestartOnCritical,
+}
+
+impl RecoveryPolicy {
+    fn action(self, health: Health) -> Action {
+        match health {
+            Health::Critical => match self {
+                RecoveryPolicy::EscalateAll => Action::Escalate,
+                RecoveryPolicy::RestartOnCritical => Action::Restart,
+            },
+            Health::Healthy | Health::Recoverable | Health::Offline => Action::Ignore,
+        }
+    }
+}
+
+/// The decision a policy makes for a given health — the supervisor's to execute.
+enum Action {
+    Ignore,
+    Restart,
+    Escalate,
+}
+
+/// What supervising a component actually did.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SupervisionOutcome {
     /// Health was acceptable; nothing was done.
     Observed,
-    /// Health was [`Health::Critical`]; the component was restarted.
+    /// The component was restarted in place.
     Restarted,
+    /// Health went `Critical` and the policy escalated it to the runtime.
+    Escalated,
 }
 
-/// The supervisor's policy: which health it will not tolerate.
-///
-/// Restart-on-critical only: `Recoverable` recovers on its own, `Offline` is a
-/// deliberate or awaited state, `Healthy` needs nothing.
-fn needs_restart(health: Health) -> bool {
-    matches!(health, Health::Critical)
-}
-
-/// One supervision step over `component`: observe its health and restart it if
-/// it has gone [`Health::Critical`], otherwise leave it. Returns what was done,
-/// or the component's own restart error.
-pub async fn supervise_step<C>(component: &C) -> Result<SupervisionOutcome, C::Error>
+/// One supervision step: observe the component's health and act per `policy`.
+pub async fn supervise_step<C>(
+    component: &C,
+    policy: RecoveryPolicy,
+) -> Result<SupervisionOutcome, C::Error>
 where
     C: StatusSource + Managed,
 {
-    if needs_restart(component.status().health) {
-        component.restart().await?;
-        Ok(SupervisionOutcome::Restarted)
-    } else {
-        Ok(SupervisionOutcome::Observed)
+    match policy.action(component.status().health) {
+        Action::Ignore => Ok(SupervisionOutcome::Observed),
+        Action::Restart => {
+            component.restart().await?;
+            Ok(SupervisionOutcome::Restarted)
+        }
+        Action::Escalate => Ok(SupervisionOutcome::Escalated),
     }
 }
 
-/// Supervise `component` reactively: wake on each status change and restart it
-/// if it has gone [`Health::Critical`]. Sleeps between transitions — no polling.
+/// Supervise `component` reactively until it escalates or goes away, sleeping
+/// between transitions — no polling.
 ///
-/// Returns once every sender is dropped (the component is gone). A caller that
-/// wants to stop supervising a live component runs this on a cancellable
-/// [`Task`](zaino_component::Task) and aborts it.
-pub async fn supervise<C>(component: &C) -> Result<(), C::Error>
+/// On each status change it acts per `policy`: restart in place and keep
+/// watching, or escalate and return [`SupervisionOutcome::Escalated`] for the
+/// runtime to act on. Returns [`SupervisionOutcome::Observed`] if the component
+/// is dropped without ever escalating.
+pub async fn supervise<C>(
+    component: &C,
+    policy: RecoveryPolicy,
+) -> Result<SupervisionOutcome, C::Error>
 where
     C: StatusWatch + Managed,
 {
     let mut status = component.subscribe();
     loop {
-        // Read (and mark seen) the current state, then act. The borrow is
-        // dropped before the await, so nothing is held across the restart.
-        if needs_restart(status.borrow_and_update().health) {
-            component.restart().await?;
+        // Copy the health out so the watch borrow is dropped before any await.
+        let health = status.borrow_and_update().health;
+        match policy.action(health) {
+            Action::Ignore => {}
+            Action::Restart => component.restart().await?,
+            Action::Escalate => return Ok(SupervisionOutcome::Escalated),
         }
         // Sleep until the next transition; `Err` means the component is gone.
         if status.changed().await.is_err() {
-            return Ok(());
+            return Ok(SupervisionOutcome::Observed);
         }
     }
 }
@@ -81,13 +116,12 @@ mod tests {
         ComponentName, ComponentStatus, Health, Lifecycle, Managed, StatusSource, StatusWatch,
     };
 
-    use super::{supervise, supervise_step, SupervisionOutcome};
+    use super::{supervise, supervise_step, RecoveryPolicy, SupervisionOutcome};
 
     const NAME: ComponentName = ComponentName("mock");
 
-    /// A watch-backed component: its status lives in the `watch`, so it is both
-    /// observable ([`StatusSource`]) and subscribable ([`StatusWatch`]).
-    /// Restarting heals it to Healthy/Ready and counts the restart.
+    /// A watch-backed component: observable, subscribable, and restartable (the
+    /// mechanism) — restarting heals it to Healthy/Ready and counts the restart.
     #[derive(Clone)]
     struct Mock {
         status: watch::Sender<ComponentStatus>,
@@ -145,56 +179,63 @@ mod tests {
         }
     }
 
-    /// Poll `cond` until true, or fail — the reactive loop runs concurrently.
-    async fn wait_until(mut cond: impl FnMut() -> bool) {
-        for _ in 0..200 {
-            if cond() {
-                return;
-            }
-            tokio::time::sleep(Duration::from_millis(5)).await;
-        }
-        panic!("condition not met in time");
-    }
-
     #[tokio::test]
-    async fn step_restarts_a_critical_component() {
+    async fn escalate_policy_bubbles_up_without_restarting() {
         let mock = Mock::in_health(Health::Critical);
         assert_eq!(
-            supervise_step(&mock).await.unwrap(),
+            supervise_step(&mock, RecoveryPolicy::EscalateAll)
+                .await
+                .unwrap(),
+            SupervisionOutcome::Escalated
+        );
+        assert_eq!(mock.restarts(), 0, "escalate policy must not restart");
+    }
+
+    #[tokio::test]
+    async fn restart_policy_exercises_the_mechanism() {
+        let mock = Mock::in_health(Health::Critical);
+        assert_eq!(
+            supervise_step(&mock, RecoveryPolicy::RestartOnCritical)
+                .await
+                .unwrap(),
             SupervisionOutcome::Restarted
         );
-        assert_eq!(mock.status().health, Health::Healthy);
         assert_eq!(mock.restarts(), 1);
+        assert_eq!(mock.status().health, Health::Healthy);
     }
 
     #[tokio::test]
-    async fn step_leaves_healthy_and_recoverable_alone() {
-        let healthy = Mock::in_health(Health::Healthy);
-        assert_eq!(
-            supervise_step(&healthy).await.unwrap(),
-            SupervisionOutcome::Observed
-        );
-        let recoverable = Mock::in_health(Health::Recoverable);
-        assert_eq!(
-            supervise_step(&recoverable).await.unwrap(),
-            SupervisionOutcome::Observed
-        );
-        assert_eq!(healthy.restarts() + recoverable.restarts(), 0);
+    async fn acceptable_health_is_observed_under_any_policy() {
+        for policy in [
+            RecoveryPolicy::EscalateAll,
+            RecoveryPolicy::RestartOnCritical,
+        ] {
+            let mock = Mock::in_health(Health::Recoverable);
+            assert_eq!(
+                supervise_step(&mock, policy).await.unwrap(),
+                SupervisionOutcome::Observed
+            );
+            assert_eq!(mock.restarts(), 0);
+        }
     }
 
     #[tokio::test]
-    async fn supervise_reacts_to_a_critical_transition() {
+    async fn supervise_escalates_on_a_critical_transition() {
         let mock = Mock::in_health(Health::Healthy);
         let watched = mock.clone();
-        let handle = tokio::spawn(async move {
-            let _ = supervise(&watched).await;
-        });
+        let supervising =
+            tokio::spawn(async move { supervise(&watched, RecoveryPolicy::EscalateAll).await });
 
-        // Drive it Critical; the reactive loop should wake and restart it.
+        // A self-healing wobble must not escalate; a Critical must.
+        mock.set_health(Health::Recoverable);
         mock.set_health(Health::Critical);
-        wait_until(|| mock.restarts() >= 1).await;
-        assert_eq!(mock.status().health, Health::Healthy);
 
-        handle.abort();
+        let outcome = tokio::time::timeout(Duration::from_secs(1), supervising)
+            .await
+            .expect("supervise returned in time")
+            .expect("supervise task ok")
+            .unwrap();
+        assert_eq!(outcome, SupervisionOutcome::Escalated);
+        assert_eq!(mock.restarts(), 0);
     }
 }
