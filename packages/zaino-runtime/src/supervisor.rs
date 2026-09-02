@@ -13,7 +13,7 @@ use zaino_component::{Health, Managed, StatusSource};
 
 /// What a supervision step did.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Supervised {
+pub enum SupervisionOutcome {
     /// Health was acceptable; nothing was done.
     Observed,
     /// Health was [`Health::Critical`]; the component was restarted.
@@ -27,16 +27,16 @@ pub enum Supervised {
 /// Restart-on-critical only: `Recoverable` is left to recover on its own,
 /// `Offline` is a deliberate or awaited state the supervisor does not force out
 /// of, and `Healthy` needs nothing.
-pub async fn supervise_step<C>(component: &C) -> Result<Supervised, C::Error>
+pub async fn supervise_step<C>(component: &C) -> Result<SupervisionOutcome, C::Error>
 where
     C: StatusSource + Managed,
 {
     match component.status().health {
         Health::Critical => {
             component.restart().await?;
-            Ok(Supervised::Restarted)
+            Ok(SupervisionOutcome::Restarted)
         }
-        Health::Healthy | Health::Recoverable | Health::Offline => Ok(Supervised::Observed),
+        Health::Healthy | Health::Recoverable | Health::Offline => Ok(SupervisionOutcome::Observed),
     }
 }
 
@@ -49,7 +49,7 @@ mod tests {
         ComponentName, ComponentStatus, Health, Lifecycle, Managed, StatusSource,
     };
 
-    use super::{supervise_step, Supervised};
+    use super::{supervise_step, SupervisionOutcome};
 
     const NAME: ComponentName = ComponentName("mock");
 
@@ -107,7 +107,10 @@ mod tests {
     #[tokio::test]
     async fn restarts_a_critical_component() {
         let mock = Mock::in_health(Health::Critical);
-        assert_eq!(supervise_step(&mock).await.unwrap(), Supervised::Restarted);
+        assert_eq!(
+            supervise_step(&mock).await.unwrap(),
+            SupervisionOutcome::Restarted
+        );
         assert_eq!(mock.status().health, Health::Healthy);
         assert_eq!(mock.restarts(), 1);
     }
@@ -115,14 +118,20 @@ mod tests {
     #[tokio::test]
     async fn leaves_a_healthy_component_alone() {
         let mock = Mock::in_health(Health::Healthy);
-        assert_eq!(supervise_step(&mock).await.unwrap(), Supervised::Observed);
+        assert_eq!(
+            supervise_step(&mock).await.unwrap(),
+            SupervisionOutcome::Observed
+        );
         assert_eq!(mock.restarts(), 0);
     }
 
     #[tokio::test]
     async fn does_not_restart_a_recoverable_component() {
         let mock = Mock::in_health(Health::Recoverable);
-        assert_eq!(supervise_step(&mock).await.unwrap(), Supervised::Observed);
+        assert_eq!(
+            supervise_step(&mock).await.unwrap(),
+            SupervisionOutcome::Observed
+        );
         assert_eq!(mock.restarts(), 0);
     }
 }
