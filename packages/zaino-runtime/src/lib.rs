@@ -22,9 +22,11 @@ mod resolve;
 mod runtime;
 mod serviceability;
 mod snapshot;
+mod supervisor;
 
 pub use config::RuntimeConfig;
 pub use error::RuntimeError;
 pub use passthrough::{PassthroughError, PassthroughSource};
 pub use runtime::{Assembler, Runtime, RuntimeBuilder};
 pub use snapshot::RuntimeSnapshot;
+pub use supervisor::{supervise_step, Supervised};

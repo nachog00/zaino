@@ -6288,6 +6288,7 @@ dependencies = [
  "futures",
  "strum",
  "tokio",
+ "zaino-component",
  "zaino-core",
  "zaino-fs",
  "zaino-nfs",
