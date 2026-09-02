@@ -17,6 +17,7 @@
 
 mod config;
 mod error;
+mod orchestra;
 mod passthrough;
 mod resolve;
 mod runtime;
@@ -29,4 +30,5 @@ pub use error::RuntimeError;
 pub use passthrough::{PassthroughError, PassthroughSource};
 pub use runtime::{Assembler, Runtime, RuntimeBuilder};
 pub use snapshot::RuntimeSnapshot;
+pub use orchestra::{BootError, Orchestra, OrchestraBuilder};
 pub use supervisor::{supervise, supervise_step, RecoveryPolicy, SupervisionOutcome};

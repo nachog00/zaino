@@ -13,6 +13,8 @@ zaino-fs = { path = "../zaino-fs" }
 zaino-nfs = { path = "../zaino-nfs" }
 futures = "0.3"
 strum = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true }
 
 [dev-dependencies]
 tokio = { workspace = true }

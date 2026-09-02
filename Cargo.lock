@@ -6287,6 +6287,7 @@ version = "0.1.0"
 dependencies = [
  "futures",
  "strum",
+ "thiserror 2.0.18",
  "tokio",
  "zaino-component",
  "zaino-core",
