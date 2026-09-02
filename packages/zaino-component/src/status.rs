@@ -2,6 +2,8 @@
 
 use core::fmt;
 
+use tokio::sync::watch;
+
 use crate::{Health, Lifecycle};
 
 /// A component's name, carried on its [`ComponentStatus`] so a transition logs
@@ -54,4 +56,15 @@ impl ComponentStatus {
 pub trait StatusSource {
     /// This component's current state.
     fn status(&self) -> ComponentStatus;
+}
+
+/// A component that publishes its status, so a supervisor can **react** to
+/// changes instead of polling.
+///
+/// The receiver always holds the latest [`ComponentStatus`]; its `changed()`
+/// wakes on each transition. This is the same `watch` shape the serviceability
+/// manifest will consume, so a component publishes once and both read it.
+pub trait StatusWatch {
+    /// Subscribe to this component's status stream.
+    fn subscribe(&self) -> watch::Receiver<ComponentStatus>;
 }
