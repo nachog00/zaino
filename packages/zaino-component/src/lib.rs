@@ -27,7 +27,7 @@ mod task;
 mod tests;
 
 pub use health::Health;
-pub use lifecycle::Lifecycle;
+pub use lifecycle::{IllegalTransition, Lifecycle};
 pub use managed::Managed;
-pub use status::{ComponentStatus, StatusSource};
+pub use status::{ComponentName, ComponentStatus, StatusSource};
 pub use task::{Task, TaskError, TaskName};

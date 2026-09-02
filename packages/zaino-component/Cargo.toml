@@ -6,6 +6,7 @@ publish = false
 description = "A supervised in-process subsystem (a Component): its health, lifecycle, management, and task supervision. Status is one facet, not the crate's identity."
 
 [dependencies]
+strum = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true }
 tokio-util = { workspace = true }

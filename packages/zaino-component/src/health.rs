@@ -6,7 +6,7 @@
 /// own at any moment (a dependency drops, a task panics), where lifecycle only
 /// moves under management. The two are read independently; neither overwrites
 /// the other.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, strum::Display)]
 pub enum Health {
     /// Working normally.
     Healthy,

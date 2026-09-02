@@ -1,20 +1,49 @@
 //! What a component reports about itself — the read side.
 
+use core::fmt;
+
 use crate::{Health, Lifecycle};
 
-/// A component's full current state: its management [`Lifecycle`] phase and its
-/// [`Health`] condition, reported together and read independently.
+/// A component's name, carried on its [`ComponentStatus`] so a transition logs
+/// with a clean identifier of *which* component changed.
 ///
-/// This full state is the source of truth a supervisor acts on. Condensed,
-/// app-wide signals (a liveness / readiness bool) are a *projection* taken at
-/// the daemon edge, not carried on every component — so they are deliberately
-/// absent here.
+/// A newtype, distinct from [`TaskName`](crate::TaskName): a component and the
+/// tasks it runs are different subjects, so mixing their names is a type error.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ComponentName(pub &'static str);
+
+impl fmt::Display for ComponentName {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.0)
+    }
+}
+
+/// A snapshot of a component's state: which component (`name`), its management
+/// `lifecycle` phase, and its `health` condition.
+///
+/// A report only — transitions are owned by [`Lifecycle`], not by this bundle.
+/// The two axes are independent: health is a condition, lifecycle a phase. A
+/// `Copy` snapshot; [`StatusSource::status`] hands out a value, not a live
+/// handle.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct ComponentStatus {
+    /// Which component this is — for attribution and logs.
+    pub name: ComponentName,
     /// The management phase.
     pub lifecycle: Lifecycle,
     /// The health condition.
     pub health: Health,
+}
+
+impl ComponentStatus {
+    /// A status snapshot for `name` at `lifecycle` / `health`.
+    pub fn new(name: ComponentName, lifecycle: Lifecycle, health: Health) -> Self {
+        Self {
+            name,
+            lifecycle,
+            health,
+        }
+    }
 }
 
 /// Anything that reports a [`ComponentStatus`].

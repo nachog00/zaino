@@ -1,23 +1,37 @@
-//! The event → state → observe → act loop, on a mock component.
+//! The event → state → observe → act loop, and the lifecycle state machine.
 //!
-//! A component is spawned; its task fails and flips its health to `Critical`
-//! (event → state); a minimal supervisor reads that through [`StatusSource`]
-//! (observe) and restarts it through [`Managed`] (act); health returns to
-//! `Healthy`. No runtime, no dev crates — just the abstraction.
+//! A component owns its own live state (no prescribed cell) and builds a
+//! [`ComponentStatus`] snapshot — carrying its name — on demand. Its task fails
+//! and flips health to `Critical` (event → state); a minimal supervisor reads
+//! that through [`StatusSource`] (observe) and restarts it through [`Managed`]
+//! (act). Separate tests pin the [`Lifecycle`] state machine and axis
+//! independence.
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use crate::{ComponentStatus, Health, Lifecycle, Managed, StatusSource, Task, TaskName};
+use crate::{
+    ComponentName, ComponentStatus, Health, Lifecycle, Managed, StatusSource, Task, TaskName,
+};
 
-/// A component whose spawned task marks it `Critical` while `fail` is set, and
-/// `Healthy` once it is cleared — a stand-in for a subsystem whose work loop
-/// dies and then recovers on restart.
+const NAME: ComponentName = ComponentName("flaky");
+
+#[derive(Debug, thiserror::Error)]
+#[error("work loop failed")]
+struct WorkFailed;
+
+/// The live state a component owns behind its own lock.
+struct Live {
+    lifecycle: Lifecycle,
+    health: Health,
+}
+
+/// A component whose task marks it `Critical` while `fail` is set, `Healthy`
+/// once cleared.
 #[derive(Clone)]
 struct Flaky {
-    health: Arc<Mutex<Health>>,
-    lifecycle: Arc<Mutex<Lifecycle>>,
+    live: Arc<Mutex<Live>>,
     fail: Arc<AtomicBool>,
     task: Arc<Mutex<Option<Task>>>,
 }
@@ -25,21 +39,41 @@ struct Flaky {
 impl Flaky {
     fn new() -> Self {
         Self {
-            health: Arc::new(Mutex::new(Health::Offline)),
-            lifecycle: Arc::new(Mutex::new(Lifecycle::Closing)),
+            live: Arc::new(Mutex::new(Live {
+                lifecycle: Lifecycle::Offline,
+                health: Health::Offline,
+            })),
             fail: Arc::new(AtomicBool::new(true)),
             task: Arc::new(Mutex::new(None)),
         }
     }
 
+    /// Advance the lifecycle through its own state machine.
+    fn advance(&self, next: Lifecycle) {
+        let mut live = self.live.lock().unwrap();
+        live.lifecycle = live
+            .lifecycle
+            .try_advance_to(next)
+            .expect("legal transition in mock");
+    }
+
+    fn set_health(&self, health: Health) {
+        self.live.lock().unwrap().health = health;
+    }
+
     fn start_task(&self) {
-        let health = Arc::clone(&self.health);
+        let live = Arc::clone(&self.live);
         let fail = Arc::clone(&self.fail);
         let task = Task::spawn(TaskName("flaky-work"), move |cancel| async move {
-            *health.lock().unwrap() = if fail.load(Ordering::SeqCst) {
-                Health::Critical
+            // The work's Err is an event that feeds the health state.
+            let outcome: Result<(), WorkFailed> = if fail.load(Ordering::SeqCst) {
+                Err(WorkFailed)
             } else {
-                Health::Healthy
+                Ok(())
+            };
+            live.lock().unwrap().health = match outcome {
+                Ok(()) => Health::Healthy,
+                Err(_) => Health::Critical,
             };
             // Then idle, as a real work loop would, until told to stop.
             cancel.cancelled().await;
@@ -50,10 +84,8 @@ impl Flaky {
 
 impl StatusSource for Flaky {
     fn status(&self) -> ComponentStatus {
-        ComponentStatus {
-            lifecycle: *self.lifecycle.lock().unwrap(),
-            health: *self.health.lock().unwrap(),
-        }
+        let live = self.live.lock().unwrap();
+        ComponentStatus::new(NAME, live.lifecycle, live.health)
     }
 }
 
@@ -61,9 +93,9 @@ impl Managed for Flaky {
     type Error = std::convert::Infallible;
 
     async fn spawn(&self) -> Result<(), Self::Error> {
-        *self.lifecycle.lock().unwrap() = Lifecycle::Spawning;
+        self.advance(Lifecycle::Spawning);
         self.start_task();
-        *self.lifecycle.lock().unwrap() = Lifecycle::Ready;
+        self.advance(Lifecycle::Ready);
         Ok(())
     }
 
@@ -73,11 +105,12 @@ impl Managed for Flaky {
     }
 
     async fn stop(&self) -> Result<(), Self::Error> {
-        *self.lifecycle.lock().unwrap() = Lifecycle::Closing;
+        self.advance(Lifecycle::Closing);
         if let Some(task) = self.task.lock().unwrap().take() {
             task.abort();
         }
-        *self.health.lock().unwrap() = Health::Offline;
+        self.set_health(Health::Offline);
+        self.advance(Lifecycle::Offline);
         Ok(())
     }
 }
@@ -114,22 +147,52 @@ async fn task_failure_flips_health_and_supervisor_restarts() {
     }
     wait_until(|| component.status().health == Health::Healthy).await;
     assert_eq!(component.status().lifecycle, Lifecycle::Ready);
+    // The name rides along on the snapshot, for logging attribution.
+    assert_eq!(component.status().name, NAME);
+}
+
+#[test]
+fn lifecycle_forbids_nonsense_and_forces_restart_through_offline() {
+    // Can't un-start a running component.
+    let err = Lifecycle::Ready
+        .try_advance_to(Lifecycle::Spawning)
+        .unwrap_err();
+    assert_eq!((err.from, err.to), (Lifecycle::Ready, Lifecycle::Spawning));
+
+    // Ready may begin closing...
+    assert_eq!(
+        Lifecycle::Ready.try_advance_to(Lifecycle::Closing).unwrap(),
+        Lifecycle::Closing
+    );
+    // ...but a closing component may not jump back to running, nor straight to
+    // spawning — it must pass through Offline.
+    assert!(Lifecycle::Closing.try_advance_to(Lifecycle::Ready).is_err());
+    assert!(
+        Lifecycle::Closing
+            .try_advance_to(Lifecycle::Spawning)
+            .is_err()
+    );
+    assert_eq!(
+        Lifecycle::Closing
+            .try_advance_to(Lifecycle::Offline)
+            .unwrap(),
+        Lifecycle::Offline
+    );
+    assert_eq!(
+        Lifecycle::Offline
+            .try_advance_to(Lifecycle::Spawning)
+            .unwrap(),
+        Lifecycle::Spawning
+    );
 }
 
 #[test]
 fn health_and_lifecycle_are_independent_axes() {
-    // A component can be Ready-but-Critical or Closing-but-Healthy: one axis
-    // moving must not imply anything about the other.
-    let ready_but_broken = ComponentStatus {
-        lifecycle: Lifecycle::Ready,
-        health: Health::Critical,
-    };
-    let closing_but_fine = ComponentStatus {
-        lifecycle: Lifecycle::Closing,
-        health: Health::Healthy,
-    };
-    assert_ne!(ready_but_broken.health, Health::Healthy);
-    assert_eq!(ready_but_broken.lifecycle, Lifecycle::Ready);
-    assert_eq!(closing_but_fine.health, Health::Healthy);
-    assert_ne!(closing_but_fine.lifecycle, Lifecycle::Ready);
+    // A snapshot can hold any (lifecycle, health) pair — the axes don't constrain
+    // each other; only lifecycle *transitions* are constrained, and those live on
+    // Lifecycle, not here.
+    let status = ComponentStatus::new(NAME, Lifecycle::Ready, Health::Critical);
+    assert_eq!(status.lifecycle, Lifecycle::Ready);
+    assert_eq!(status.health, Health::Critical);
+    assert_eq!(status.name, NAME);
 }
