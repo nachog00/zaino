@@ -106,7 +106,39 @@ pub struct Orchestra {
     escalations: mpsc::UnboundedReceiver<ComponentName>,
 }
 
+/// The result of running the orchestra to completion.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RuntimeOutcome {
+    /// A component escalated. Under today's everything-fatal policy this brings
+    /// the whole app down; the field names which component. (Later: only a
+    /// *required* component is fatal — an optional one degrades and the app runs
+    /// on.)
+    Fatal {
+        /// The component that escalated.
+        component: ComponentName,
+    },
+    /// Every component stopped without escalating — a clean settle.
+    Settled,
+}
+
 impl Orchestra {
+    /// Run until a component escalates, then act on it.
+    ///
+    /// Current policy is everything-fatal: the first escalation shuts the rest
+    /// down and returns [`RuntimeOutcome::Fatal`]. If every component stops
+    /// without escalating, returns [`RuntimeOutcome::Settled`]. (Later this will
+    /// loop, handling a non-fatal escalation per the component's role instead of
+    /// tearing everything down.)
+    pub async fn run(mut self) -> RuntimeOutcome {
+        match self.next_escalation().await {
+            Some(component) => {
+                self.shutdown();
+                RuntimeOutcome::Fatal { component }
+            }
+            None => RuntimeOutcome::Settled,
+        }
+    }
+
     /// The next component to escalate (go Critical), or `None` once every
     /// babysitter has stopped.
     pub async fn next_escalation(&mut self) -> Option<ComponentName> {
@@ -149,7 +181,7 @@ mod tests {
         ComponentName, ComponentStatus, Health, Lifecycle, Managed, StatusSource, StatusWatch,
     };
 
-    use super::OrchestraBuilder;
+    use super::{OrchestraBuilder, RuntimeOutcome};
 
     /// A watch-backed component that records the order in which it is spawned.
     #[derive(Clone)]
@@ -245,5 +277,33 @@ mod tests {
         assert_eq!(escalated, Some(ComponentName("fs")));
 
         orchestra.shutdown();
+    }
+
+    #[tokio::test]
+    async fn an_escalation_is_fatal_and_names_the_component() {
+        let boot_log = Arc::new(Mutex::new(Vec::new()));
+        let validator = Mock::new("validator", boot_log.clone());
+        let fs = Mock::new("fs", boot_log.clone());
+
+        let orchestra = OrchestraBuilder::new()
+            .boot(validator.clone())
+            .await
+            .unwrap()
+            .boot(fs.clone())
+            .await
+            .unwrap()
+            .build();
+
+        // fs falls over → everything-fatal: the app comes down, naming fs.
+        fs.set_health(Health::Critical);
+        let outcome = tokio::time::timeout(Duration::from_secs(1), orchestra.run())
+            .await
+            .expect("orchestra ran to a decision");
+        assert_eq!(
+            outcome,
+            RuntimeOutcome::Fatal {
+                component: ComponentName("fs")
+            }
+        );
     }
 }

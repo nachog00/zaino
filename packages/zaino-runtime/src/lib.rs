@@ -30,5 +30,5 @@ pub use error::RuntimeError;
 pub use passthrough::{PassthroughError, PassthroughSource};
 pub use runtime::{Assembler, Runtime, RuntimeBuilder};
 pub use snapshot::RuntimeSnapshot;
-pub use orchestra::{BootError, Orchestra, OrchestraBuilder};
+pub use orchestra::{BootError, Orchestra, OrchestraBuilder, RuntimeOutcome};
 pub use supervisor::{supervise, supervise_step, RecoveryPolicy, SupervisionOutcome};
