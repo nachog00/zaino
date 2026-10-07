@@ -4570,6 +4570,7 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "zaino-backend-lmdb",
+ "zaino-common",
  "zaino-consensus",
  "zaino-indexer",
  "zaino-indexes",

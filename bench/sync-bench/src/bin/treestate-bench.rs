@@ -144,6 +144,9 @@ struct Args {
 }
 
 fn main() -> Result<(), BoxError> {
+    // The zebra cross-check builds a reqwest client, which never auto-selects a
+    // rustls provider in this workspace.
+    zaino_common::crypto::ensure_default_crypto_provider();
     init_logging();
     let args = Args::parse();
 
