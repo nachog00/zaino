@@ -17,6 +17,8 @@ members = [
     "packages/zainod",
     "packages/zaino-proto",
     "packages/zaino-peers",
+    # Scratch measurement harness (leaf crate; nothing depends on it). Not for merge.
+    "bench/tree-state-bench",
     # live-tests/ = standalone workspace (ztest harness, links no production crate)
 ]
 

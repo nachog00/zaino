@@ -1,0 +1,77 @@
+# Scratch measurement harness for PR #1638's tree-state index.
+#
+# Mirrors the repo's root Dockerfile (debian bookworm-slim runtime, pinned apt
+# packages, non-root user) but builds the `tree-state-bench` binary instead of
+# zainod. Build with buildkit from a git context at the repo root, e.g.:
+#   podman build -f bench/tree-state-bench/Containerfile -t tree-state-bench .
+
+############################
+# Global build args
+############################
+ARG UID=1000
+ARG GID=1000
+ARG USER=container_user
+ARG HOME=/home/container_user
+
+############################
+# Builder
+############################
+FROM docker.io/library/rust:1.98.0-bookworm AS builder
+SHELL ["/bin/bash", "-euo", "pipefail", "-c"]
+WORKDIR /app
+
+ARG CARGO_PROFILE=release
+
+# Build deps: protoc for the workspace's prost-build crates; a C toolchain for
+# lmdb-sys (bundled liblmdb). Versions pinned (DL3008) to the candidates in
+# docker.io/library/rust:1.98.0-bookworm; bump with the base image.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      pkg-config=1.8.1-1 \
+      make=4.3-4.1 \
+      ca-certificates=20250419~deb12u1 \
+      protobuf-compiler=3.21.12-3+deb12u1 \
+  && rm -rf /var/lib/apt/lists/*
+
+# Copy the entire workspace (the bench crate is a workspace member).
+COPY . .
+
+# Install the bench binary to a known prefix (/out), caching registry/git/target.
+RUN --mount=type=cache,target=/usr/local/cargo/registry \
+    --mount=type=cache,target=/usr/local/cargo/git \
+    --mount=type=cache,target=/app/target \
+    cargo install --locked --path bench/tree-state-bench --bin tree-state-bench \
+      --root /out --profile "${CARGO_PROFILE}"
+
+############################
+# Runtime
+############################
+FROM docker.io/library/debian:bookworm-slim AS runtime
+SHELL ["/bin/bash", "-euo", "pipefail", "-c"]
+
+ARG UID
+ARG GID
+ARG USER
+ARG HOME
+
+# Runtime deps only. liblmdb is statically linked into the binary (lmdb-sys);
+# libgcc + ca-certificates round out a bare dynamic binary.
+RUN apt-get -qq update && \
+    apt-get -qq install -y --no-install-recommends \
+      ca-certificates=20250419~deb12u1 \
+      libgcc-s1=12.2.0-14+deb12u1 \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN addgroup --gid "${GID}" "${USER}" && \
+    adduser  --uid "${UID}" --gid "${GID}" --home "${HOME}" \
+             --disabled-password --gecos "" "${USER}"
+
+ENV HOME=${HOME}
+WORKDIR ${HOME}
+
+COPY --from=builder /out/bin/tree-state-bench /usr/local/bin/tree-state-bench
+
+USER ${USER}
+
+# STORE_DIR (our LMDB store, read-only), WORK_DIR (where #1638's index is
+# written), ZEBRA_RPC, K are passed at run time.
+ENTRYPOINT ["tree-state-bench"]
