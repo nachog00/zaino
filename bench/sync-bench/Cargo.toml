@@ -47,6 +47,18 @@ clap = { workspace = true, features = ["derive", "env"] }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
 zebra-chain = { workspace = true }
+incrementalmerkletree.workspace = true
+sapling-crypto.workspace = true
+lmdb.workspace = true
+lmdb-sys.workspace = true
+rayon.workspace = true
+hex.workspace = true
+serde_json.workspace = true
+orchard = "0.15.3"
+reqwest = { workspace = true, features = ["blocking", "json"] }
 
 [lints.rust]
 unsafe_code = "forbid"
+
+[dev-dependencies]
+tempfile.workspace = true
