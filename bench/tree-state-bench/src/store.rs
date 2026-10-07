@@ -40,11 +40,11 @@ pub fn load(
         // `_format_versions` bookkeeping, and headroom besides.
         .set_max_dbs(32)
         .set_map_size(map_size_bytes)
-        // READ_ONLY: never write the live store. NO_TLS: the read txn may move
-        // across threads. NO_READAHEAD: the scan is one linear pass.
-        .set_flags(
-            EnvironmentFlags::READ_ONLY | EnvironmentFlags::NO_TLS | EnvironmentFlags::NO_READAHEAD,
-        )
+        // READ_ONLY: never write the live store. NO_READAHEAD: the scan is one
+        // linear pass. No NO_TLS: the scan runs on one blocking thread, and
+        // opening the live store with NO_TLS beside its writer failed with
+        // EAGAIN on the cluster.
+        .set_flags(EnvironmentFlags::READ_ONLY | EnvironmentFlags::NO_READAHEAD)
         .open(store_dir)?;
 
     let sapling = scan(&env, "sapling", decode::sapling_commitments)?;
