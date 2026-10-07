@@ -963,15 +963,15 @@ mod driver {
         f64::from(u32::try_from(count).unwrap_or(u32::MAX)) / secs
     }
 
-    /// Append every commitment in `value` to `frontier`, returning how many were
-    /// appended. The shared inner step of all three modes.
-    fn append_block<P: Pool>(
+    /// Append already-decoded commitments to `frontier`. Isolated from the codec
+    /// decode so the serial pass can time leaf-append (field decode + frontier
+    /// insert) apart from store read+decode.
+    fn append_leaves<P: Pool>(
         frontier: &mut Frontier<P::Leaf, TREE_DEPTH>,
         height: u64,
-        value: &[u8],
-    ) -> Result<u64, BoxError> {
-        let commitments = P::commitments(value)?;
-        for bytes in &commitments {
+        commitments: &[[u8; 32]],
+    ) -> Result<(), BoxError> {
+        for bytes in commitments {
             let leaf = P::Leaf::from_commitment(*bytes).ok_or_else(|| {
                 format!(
                     "{}: non-canonical commitment at height {height}",
@@ -982,6 +982,19 @@ mod driver {
                 return Err(format!("{}: frontier full at height {height}", P::DISPLAY).into());
             }
         }
+        Ok(())
+    }
+
+    /// Decode a block value and append every commitment it holds, returning the
+    /// count. The shared inner step of the reads pass (which does not split the
+    /// decode and append timings).
+    fn append_block<P: Pool>(
+        frontier: &mut Frontier<P::Leaf, TREE_DEPTH>,
+        height: u64,
+        value: &[u8],
+    ) -> Result<u64, BoxError> {
+        let commitments = P::commitments(value)?;
+        append_leaves::<P>(frontier, height, &commitments)?;
         Ok(u64::try_from(commitments.len())?)
     }
 
@@ -1050,16 +1063,21 @@ mod driver {
 
         let wall = Instant::now();
         store.for_each(P::namespace(), &P::start_key(start), |key, value| {
+            // Read+decode: height key, end bound, and the block value codec.
             let read_at = Instant::now();
             let height = P::height_of(key)?;
             if end.is_some_and(|e| height > e) {
                 return Ok(false);
             }
+            let commitments = P::commitments(value)?;
             let read_elapsed = read_at.elapsed();
 
+            // Append: leaf field-decode + frontier insert — the per-height index
+            // cost a streaming treestate index would pay.
             let append_at = Instant::now();
-            let appended = append_block::<P>(&mut frontier, height, value)?;
+            append_leaves::<P>(&mut frontier, height, &commitments)?;
             let append_elapsed = append_at.elapsed();
+            let appended = u64::try_from(commitments.len())?;
 
             total_leaves += appended;
             read_decode += read_elapsed;
