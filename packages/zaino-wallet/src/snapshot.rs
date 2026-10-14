@@ -21,6 +21,7 @@ use crate::dto::{
 use crate::WalletError;
 
 /// A pinned view into the chain, over every read a full wallet needs.
+#[derive(Clone)]
 pub struct WalletSnapshot<S> {
     pub(crate) snap: S,
 }

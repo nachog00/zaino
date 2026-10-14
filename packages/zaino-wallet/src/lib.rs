@@ -33,6 +33,7 @@ use futures::stream::{BoxStream, StreamExt};
 use zaino_service::FullWalletService;
 
 /// The indexer a full wallet library queries, over a [`FullWalletService`] engine.
+#[derive(Clone)]
 pub struct Indexer<W: FullWalletService> {
     engine: W,
 }
@@ -169,5 +170,18 @@ mod tests {
                 },
             }
         );
+    }
+
+    /// `Indexer` and `WalletSnapshot` must both be `Clone` whenever the engine
+    /// and its snapshot are: zallet's real `Chain`/`ChainView` trait requires
+    /// `Clone` on both, so a backend wrapping ours has to be able to clone
+    /// through them.
+    #[test]
+    fn indexer_and_snapshot_are_clone_when_the_engine_is() {
+        fn assert_clone<T: Clone>() {}
+        assert_clone::<Indexer<MockIndexerService>>();
+        assert_clone::<
+            super::WalletSnapshot<<MockIndexerService as zaino_service::TakeSnapshot>::Snapshot>,
+        >();
     }
 }
