@@ -51,6 +51,18 @@ TransactionRead`, plus the engine controls), never the wider inner surface —
 so adding a node-rpc-only capability to the engine cannot accidentally widen
 what this crate exposes.
 
+## Try it
+
+`examples/full_wallet_demo.rs` is a runnable, narrated walk through the whole
+public surface — every `Indexer`/`WalletSnapshot` method, each DTO printed and
+asserted against a scripted `MockIndexerService` (there is no real
+`FullWalletService` deployment wired up anywhere yet, so this is the adapter's
+wiring proven, not a real engine's answers):
+
+```text
+cargo run -p zaino-wallet --example full_wallet_demo
+```
+
 ## What is deliberately not here yet
 
 `ForkReconcile` (zallet's `find_fork_point` + raw-block-since-fork replay) has
