@@ -2,7 +2,7 @@
 
 use zaino_primitives::types::HeightOverflow;
 use zaino_service::error::{
-    AddressReadError, BlockReadError, BroadcastRejection, Transient, TreestateReadError,
+    AddressReadError, BlockReadError, BroadcastRejection, ReadError, Transient, TreestateReadError,
     TxReadError,
 };
 
@@ -32,4 +32,7 @@ pub enum WalletError {
     /// The treestate or subtree-roots read failed.
     #[error(transparent)]
     TreestateRead(#[from] TreestateReadError),
+    /// The reported-upgrades read failed.
+    #[error(transparent)]
+    ReportedUpgrades(#[from] ReadError),
 }

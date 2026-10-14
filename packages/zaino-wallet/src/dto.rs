@@ -9,7 +9,7 @@ use zaino_primitives::types::{
     AddressBalance, AddressDelta, BlockRef, BlockSelector, Height, HeightOverflow, PoolTreestate,
     RawTransaction, ShieldedPool, SubtreeRoot, TransactionId, TransactionLocation, Treestate, Utxo,
 };
-use zaino_service::{LocatedTxid, TxStatus};
+use zaino_service::{LocatedTxid, MempoolTx, ReportedUpgrade, TipEvent, TxStatus, UpgradeStatus};
 
 /// The tip a pinned view is coherent as of.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -310,6 +310,74 @@ impl WalletSubtreeRoot {
             root: root.root.into(),
             completing_block_hash: root.completing_block_hash.into(),
             end_height: root.end_height.into(),
+        }
+    }
+}
+
+/// The best chain moved; carries the new tip.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct WalletTipEvent {
+    pub tip: WalletTip,
+}
+
+impl WalletTipEvent {
+    pub(crate) fn from_domain(event: TipEvent) -> Self {
+        Self {
+            tip: WalletTip::from_domain(event.tip),
+        }
+    }
+}
+
+/// A mempool delivery, tagged with the tip it was validated against.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct WalletMempoolEvent {
+    pub txid: WalletTxId,
+    pub validated_against: WalletTip,
+}
+
+impl WalletMempoolEvent {
+    pub(crate) fn from_domain(tx: MempoolTx) -> Self {
+        Self {
+            txid: WalletTxId::from_domain(tx.txid),
+            validated_against: WalletTip::from_domain(tx.validated_against),
+        }
+    }
+}
+
+/// Whether a network upgrade is active, pending, or disabled.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum WalletUpgradeStatus {
+    Active,
+    Pending,
+    Disabled,
+}
+
+impl WalletUpgradeStatus {
+    fn from_domain(status: UpgradeStatus) -> Self {
+        match status {
+            UpgradeStatus::Active => Self::Active,
+            UpgradeStatus::Pending => Self::Pending,
+            UpgradeStatus::Disabled => Self::Disabled,
+        }
+    }
+}
+
+/// One entry of the validator's reported network-upgrade schedule.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct WalletReportedUpgrade {
+    pub branch_id: u32,
+    pub name: String,
+    pub activation_height: u32,
+    pub status: WalletUpgradeStatus,
+}
+
+impl WalletReportedUpgrade {
+    pub(crate) fn from_domain(upgrade: ReportedUpgrade) -> Self {
+        Self {
+            branch_id: upgrade.branch_id,
+            name: upgrade.name,
+            activation_height: upgrade.activation_height.into(),
+            status: WalletUpgradeStatus::from_domain(upgrade.status),
         }
     }
 }
