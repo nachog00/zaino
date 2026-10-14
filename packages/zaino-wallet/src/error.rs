@@ -1,6 +1,7 @@
 //! Adapter error type.
 
-use zaino_service::error::{BroadcastRejection, Transient};
+use zaino_primitives::types::HeightOverflow;
+use zaino_service::error::{AddressReadError, BroadcastRejection, Transient};
 
 /// A wallet-adapter failure. Chains the inner per-capability error as its
 /// `source`.
@@ -12,4 +13,11 @@ pub enum WalletError {
     /// The engine rejected the broadcast (a domain answer, not a backend failure).
     #[error(transparent)]
     Broadcast(#[from] BroadcastRejection),
+    /// A caller-supplied height exceeds the protocol's valid range.
+    #[error(transparent)]
+    InvalidHeight(#[from] HeightOverflow),
+    /// The address read failed (not serviceable yet, over budget, or a
+    /// backend failure).
+    #[error(transparent)]
+    AddressRead(#[from] AddressReadError),
 }
