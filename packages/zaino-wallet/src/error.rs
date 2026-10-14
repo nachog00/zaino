@@ -32,7 +32,8 @@ pub enum WalletError {
     /// The treestate or subtree-roots read failed.
     #[error(transparent)]
     TreestateRead(#[from] TreestateReadError),
-    /// The reported-upgrades read failed.
+    /// A generic read failed (reported upgrades, or one item of a streamed
+    /// read such as `stream_compact`).
     #[error(transparent)]
-    ReportedUpgrades(#[from] ReadError),
+    Read(#[from] ReadError),
 }
