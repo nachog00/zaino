@@ -27,6 +27,7 @@ use zaino_service::BlockDeltasRead;
 use zaino_service::BlockHashRead;
 use zaino_service::BlockVerboseRead;
 use zaino_service::ChainTipsRead;
+use zaino_service::RawBlockRead;
 use zaino_service::RawTransactionRead;
 use zaino_service::SpendRead;
 use zaino_service::TransactionViewRead;

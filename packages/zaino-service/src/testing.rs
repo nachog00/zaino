@@ -45,8 +45,8 @@ use crate::{
     Broadcast, ChainInfoRead, ChainSegment, ChainTipsRead, CompactBlockRead, CompactNullifierRead,
     ForkReconcile, HeaderRead, HeaderSummary, IndexerService, LocatedTransactionView,
     MempoolContent, MempoolEntry, MempoolListing, MempoolSubscribe, MempoolSummary,
-    NodeStatusError, NodeStatusRead, PoolActivationSource, RawTransactionRead, ReadBudget,
-    ReportedUpgrades, Serviceable, Snapshot, SpendRead, TakeSnapshot, TipSubscribe,
+    NodeStatusError, NodeStatusRead, PoolActivationSource, RawBlockRead, RawTransactionRead,
+    ReadBudget, ReportedUpgrades, Serviceable, Snapshot, SpendRead, TakeSnapshot, TipSubscribe,
     TransactionLocationRead, TransactionRead, TransactionViewRead, TreestateRead,
     TreestateWindowRead, TxOutRead,
 };
@@ -731,6 +731,9 @@ impl BlockVerboseRead for MockSnapshot {
             _ => Ok(self.chain.block_verbose.clone()),
         }
     }
+}
+
+impl RawBlockRead for MockSnapshot {
     async fn raw_block(&self, _at: BlockSelector) -> Result<Option<Vec<u8>>, BlockReadError> {
         // Scripted raw bytes returned for any selector; absent them, a served
         // `None`. The full block is otherwise a passthrough the service mock has no

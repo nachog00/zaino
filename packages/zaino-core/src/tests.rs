@@ -1133,6 +1133,39 @@ mod block_verbose_reads {
             other => panic!("an unreachable validator must error, not answer None: {other:?}"),
         }
     }
+}
+
+// --- raw block reads: always passthrough ------------------------------------
+//
+// `RawBlockRead` relays the validator's raw consensus bytes for a block — the
+// bytes the block hash commits to, parsed by the caller (a full wallet) rather
+// than by Zaino. A domain miss is `Ok(None)`; an unreachable validator errors.
+mod raw_block_reads {
+    use super::*;
+    use zaino_primitives::types::{BlockHash, BlockSelector};
+    use zaino_service::RawBlockRead;
+    use zaino_service::error::BlockReadError;
+    use zaino_source::FailureMode;
+    use zaino_source::mock::MockChain;
+
+    /// A single-attempt policy: one injected failure is terminal, so an error
+    /// test cannot be masked by the default policy's retries.
+    fn single_attempt() -> RetryPolicy {
+        RetryPolicy {
+            max_attempts: 1,
+            ..RetryPolicy::default()
+        }
+    }
+
+    /// An engine with an empty local view over `source`, single-attempt, so an
+    /// injected transport failure is terminal.
+    fn engine_single_attempt(source: MockChain) -> LightEngine {
+        Engine::new(
+            StubNonFinalised::empty(),
+            StubNonFinalised::empty(),
+            ValidatorClient::new(source, single_attempt()),
+        )
+    }
 
     #[tokio::test]
     async fn raw_block_by_height_passes_through() {
@@ -1144,7 +1177,7 @@ mod block_verbose_reads {
                 .with_raw_block_by_hash(vec![0xCC, 0xDD]),
         );
         let snapshot = engine.snapshot().await.expect("snapshot acquired");
-        let bytes = BlockVerboseRead::raw_block(&snapshot, BlockSelector::Height(height(5)))
+        let bytes = RawBlockRead::raw_block(&snapshot, BlockSelector::Height(height(5)))
             .await
             .expect("served")
             .expect("present");
@@ -1160,7 +1193,7 @@ mod block_verbose_reads {
         );
         let snapshot = engine.snapshot().await.expect("snapshot acquired");
         let bytes =
-            BlockVerboseRead::raw_block(&snapshot, BlockSelector::Hash(BlockHash::from([2u8; 32])))
+            RawBlockRead::raw_block(&snapshot, BlockSelector::Hash(BlockHash::from([2u8; 32])))
                 .await
                 .expect("served")
                 .expect("present");
@@ -1173,13 +1206,13 @@ mod block_verbose_reads {
         let engine = engine_with(MockChain::new());
         let snapshot = engine.snapshot().await.expect("snapshot acquired");
         assert!(
-            BlockVerboseRead::raw_block(&snapshot, BlockSelector::Height(height(99)))
+            RawBlockRead::raw_block(&snapshot, BlockSelector::Height(height(99)))
                 .await
                 .expect("a domain miss is a served None, not an error")
                 .is_none()
         );
         assert!(
-            BlockVerboseRead::raw_block(&snapshot, BlockSelector::Hash(BlockHash::from([9u8; 32])))
+            RawBlockRead::raw_block(&snapshot, BlockSelector::Hash(BlockHash::from([9u8; 32])))
                 .await
                 .expect("a domain miss is a served None, not an error")
                 .is_none()
@@ -1196,7 +1229,7 @@ mod block_verbose_reads {
                 .fail_next(1, FailureMode::Connection),
         );
         let snapshot = engine.snapshot().await.expect("snapshot acquired");
-        match BlockVerboseRead::raw_block(&snapshot, BlockSelector::Height(height(5))).await {
+        match RawBlockRead::raw_block(&snapshot, BlockSelector::Height(height(5))).await {
             Err(BlockReadError::Transient(_)) => {}
             other => panic!("an unreachable validator must error, not answer None: {other:?}"),
         }

@@ -58,7 +58,7 @@ pub use reads::{
     AddressRead, AddressReceiveRead, BlockHashAt, BlockHashRead, BlockRead, BlockTransactionViews,
     BlockVerboseRead, ChainInfoRead, ChainTipsRead, CompactBlockRead, CompactNullifierRead,
     ForkReconcile, HeaderRead, HeaderSummary, LocatedTransactionView, LocatedTxid,
-    PoolActivationSource, RawTransactionRead, ReadBudget, ResolvedInput, SpendRead,
+    PoolActivationSource, RawBlockRead, RawTransactionRead, ReadBudget, ResolvedInput, SpendRead,
     TransactionLocationRead, TransactionRead, TransactionView, TransactionViewRead, TreestateRead,
     TreestateWindowRead,
 };

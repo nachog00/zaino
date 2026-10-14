@@ -13,8 +13,8 @@
 use crate::block_deltas::BlockDeltasRead;
 use crate::reads::{
     AddressRead, BlockHashRead, BlockRead, BlockVerboseRead, ChainInfoRead, ChainTipsRead,
-    CompactBlockRead, CompactNullifierRead, RawTransactionRead, SpendRead, TransactionRead,
-    TransactionViewRead, TreestateRead,
+    CompactBlockRead, CompactNullifierRead, RawBlockRead, RawTransactionRead, SpendRead,
+    TransactionRead, TransactionViewRead, TreestateRead,
 };
 
 /// Reads shared by every wallet-shaped consumer — scan compact blocks, build
@@ -39,8 +39,17 @@ impl<T> WalletReadCore for T where
 /// The full-wallet read demand. A sibling of [`LightWalletReads`] over
 /// [`WalletReadCore`] — full-wallet-only reads land here as its own delta,
 /// never on a line the light path shares.
-pub trait FullWalletReads: WalletReadCore {}
-impl<T> FullWalletReads for T where T: WalletReadCore {}
+///
+/// [`RawBlockRead`] is the full-wallet delta a light wallet never needs: a full
+/// wallet reconciles forks from raw blocks (`ForkReconcile`, layered on top of
+/// this read-set, not part of it), while a light client scans compact blocks
+/// alone. [`TransactionRead::transaction_status`] is the other delta: whether a
+/// transaction the wallet sent has been mined, orphaned, or neither — a full
+/// wallet tracks this directly; [`RawTransactionRead`] alone has no such
+/// method. The pool-decomposed [`TransactionRead::transaction`] comes bundled
+/// with it (one trait), but the wallet adapter has no obligation to expose it.
+pub trait FullWalletReads: WalletReadCore + RawBlockRead + TransactionRead {}
+impl<T> FullWalletReads for T where T: WalletReadCore + RawBlockRead + TransactionRead {}
 
 /// The light-wallet read demand. A sibling of [`FullWalletReads`] over
 /// [`WalletReadCore`]; its delta is the compact-block nullifier serving
@@ -80,6 +89,7 @@ impl<T> LightWalletReads for T where T: WalletReadCore + CompactNullifierRead {}
 pub trait NodeRpcReads:
     BlockRead
     + BlockVerboseRead
+    + RawBlockRead
     + BlockHashRead
     + BlockDeltasRead
     + TransactionRead
@@ -95,6 +105,7 @@ pub trait NodeRpcReads:
 impl<T> NodeRpcReads for T where
     T: BlockRead
         + BlockVerboseRead
+        + RawBlockRead
         + BlockHashRead
         + BlockDeltasRead
         + TransactionRead

@@ -174,13 +174,24 @@ pub trait BlockVerboseRead: Send + Sync {
         &self,
         at: BlockSelector,
     ) -> impl Future<Output = Result<Option<BlockVerbose>, BlockReadError>> + Send;
-    /// The raw consensus bytes of the block `at` — exactly the bytes the block
-    /// hash commits to. `Ok(None)` when the selector names no block.
+}
+
+/// The raw consensus bytes of a block — exactly the bytes the block hash
+/// commits to. A wallet parses these itself, the same precedent
+/// [`RawTransactionRead`] sets for transactions: a full wallet reconciles
+/// forks from raw blocks (see `ForkReconcile`), while a light wallet never
+/// asks for them, so this is its own trait rather than a [`BlockRead`] or
+/// [`BlockVerboseRead`] method.
+///
+/// Backed by: passthrough to the validator's raw-block reads.
+pub trait RawBlockRead: Send + Sync {
+    /// The raw consensus bytes of the block `at`. `Ok(None)` when the selector
+    /// names no block.
     ///
-    /// The node-only surface behind `getblock(_, 0)`, which the explorer's search
-    /// page calls to test whether a string is a block. Always passthrough, for the
-    /// same reason as the full [`BlockRead::block`] read: the finalised store holds
-    /// compact projections, not full block bytes.
+    /// Also the surface behind `getblock(_, 0)`, which the explorer's search
+    /// page calls to test whether a string is a block. Always passthrough, for
+    /// the same reason as the full [`BlockRead::block`] read: the finalised
+    /// store holds compact projections, not full block bytes.
     fn raw_block(
         &self,
         at: BlockSelector,
