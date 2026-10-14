@@ -18,7 +18,14 @@ mod dto;
 mod error;
 mod snapshot;
 
-pub use dto::{WalletMempoolEvent, WalletReportedUpgrade, WalletTip, WalletTipEvent, WalletTxId};
+pub use dto::{
+    WalletAddressBalance, WalletAddressDelta, WalletBlockSelector, WalletChainMetadata,
+    WalletCompactBlock, WalletCompactTx, WalletLocatedTxid, WalletMempoolEvent,
+    WalletOrchardAction, WalletPoolTreestate, WalletRawTransaction, WalletReportedUpgrade,
+    WalletSaplingOutput, WalletShieldedPool, WalletSubtreeRoot, WalletTip, WalletTipEvent,
+    WalletTransactionLocation, WalletTransparentInput, WalletTransparentOutput, WalletTreestate,
+    WalletTxId, WalletTxStatus, WalletUpgradeStatus, WalletUtxo,
+};
 pub use error::WalletError;
 pub use snapshot::WalletSnapshot;
 

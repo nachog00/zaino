@@ -5,6 +5,13 @@
 //! Conversions are named for direction: `from_domain` for a read coming out,
 //! `into_domain` for a caller-supplied selector going in.
 
+mod compact_block;
+
+pub use compact_block::{
+    WalletChainMetadata, WalletCompactBlock, WalletCompactTx, WalletOrchardAction,
+    WalletSaplingOutput, WalletTransparentInput, WalletTransparentOutput,
+};
+
 use zaino_primitives::types::{
     AddressBalance, AddressDelta, BlockRef, BlockSelector, Height, HeightOverflow, PoolTreestate,
     RawTransaction, ShieldedPool, SubtreeRoot, TransactionId, TransactionLocation, Treestate, Utxo,

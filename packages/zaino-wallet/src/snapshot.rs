@@ -7,15 +7,16 @@
 //! the same chain position — re-pinning per call could see the tip move
 //! between them.
 
+use futures::stream::{BoxStream, StreamExt};
 use zaino_primitives::types::{
     Height, HeightOverflow, HeightRange, TransactionId, TransparentAddress,
 };
 use zaino_service::{ChainSegment, FullWalletReads, ReadBudget};
 
 use crate::dto::{
-    WalletAddressBalance, WalletAddressDelta, WalletBlockSelector, WalletLocatedTxid,
-    WalletRawTransaction, WalletShieldedPool, WalletSubtreeRoot, WalletTip, WalletTreestate,
-    WalletTxStatus, WalletUtxo,
+    WalletAddressBalance, WalletAddressDelta, WalletBlockSelector, WalletCompactBlock,
+    WalletLocatedTxid, WalletRawTransaction, WalletShieldedPool, WalletSubtreeRoot, WalletTip,
+    WalletTreestate, WalletTxStatus, WalletUtxo,
 };
 use crate::WalletError;
 
@@ -163,6 +164,30 @@ impl<S: ChainSegment + FullWalletReads> WalletSnapshot<S> {
             .into_iter()
             .map(WalletSubtreeRoot::from_domain)
             .collect())
+    }
+
+    /// The compact block at `at`, for a wallet's note scanner. `None` when the
+    /// selector names no block.
+    pub async fn compact_block(
+        &self,
+        at: WalletBlockSelector,
+    ) -> Result<Option<WalletCompactBlock>, WalletError> {
+        let block = self.snap.compact_block(at.into_domain()?).await?;
+        Ok(block.map(WalletCompactBlock::from_domain))
+    }
+
+    /// Compact blocks over `[start, end]`, in height order.
+    pub fn stream_compact(
+        &self,
+        start: u32,
+        end: u32,
+    ) -> Result<BoxStream<'_, Result<WalletCompactBlock, WalletError>>, HeightOverflow> {
+        let range = height_range(start, end)?;
+        Ok(self
+            .snap
+            .stream_compact(range)
+            .map(|result| Ok(WalletCompactBlock::from_domain(result?)))
+            .boxed())
     }
 }
 
@@ -532,5 +557,37 @@ mod tests {
                 end_height: 50,
             }]
         );
+    }
+
+    /// An unknown selector is a served `None`, not an error. The mock scripts
+    /// no compact blocks; the deep conversion itself is proven directly
+    /// against the domain type in `dto::compact_block`'s own tests.
+    #[tokio::test]
+    async fn compact_block_of_an_unknown_selector_is_none() {
+        let indexer = Indexer::new(MockIndexerService::new(MockChain::default()));
+        let snapshot = indexer.snapshot().await.expect("snapshot acquired");
+
+        assert!(snapshot
+            .compact_block(crate::dto::WalletBlockSelector::Height(5))
+            .await
+            .expect("compact block read")
+            .is_none());
+    }
+
+    /// An empty chain streams no compact blocks.
+    #[tokio::test]
+    async fn stream_compact_over_an_empty_chain_yields_nothing() {
+        use futures::StreamExt;
+
+        let indexer = Indexer::new(MockIndexerService::new(MockChain::default()));
+        let snapshot = indexer.snapshot().await.expect("snapshot acquired");
+
+        let blocks: Vec<_> = snapshot
+            .stream_compact(0, 10)
+            .expect("a valid range")
+            .collect()
+            .await;
+
+        assert!(blocks.is_empty());
     }
 }
