@@ -7,11 +7,14 @@
 //! the same chain position — re-pinning per call could see the tip move
 //! between them.
 
-use zaino_primitives::types::{Height, HeightOverflow, HeightRange, TransparentAddress};
+use zaino_primitives::types::{
+    Height, HeightOverflow, HeightRange, TransactionId, TransparentAddress,
+};
 use zaino_service::{ChainSegment, FullWalletReads, ReadBudget};
 
 use crate::dto::{
-    WalletAddressBalance, WalletAddressDelta, WalletLocatedTxid, WalletTip, WalletUtxo,
+    WalletAddressBalance, WalletAddressDelta, WalletBlockSelector, WalletLocatedTxid,
+    WalletRawTransaction, WalletTip, WalletTxStatus, WalletUtxo,
 };
 use crate::WalletError;
 
@@ -109,6 +112,31 @@ impl<S: ChainSegment + FullWalletReads> WalletSnapshot<S> {
             .into_iter()
             .map(WalletLocatedTxid::from_domain)
             .collect())
+    }
+
+    /// A transaction's raw serialized bytes, plus where it lives. `None` when
+    /// the id names no transaction.
+    pub async fn raw_transaction(
+        &self,
+        txid: [u8; 32],
+    ) -> Result<Option<WalletRawTransaction>, WalletError> {
+        let raw = self.snap.raw_transaction(TransactionId::from(txid)).await?;
+        Ok(raw.map(WalletRawTransaction::from_domain))
+    }
+
+    /// Whether a transaction has been mined, orphaned, or neither.
+    pub async fn transaction_status(&self, txid: [u8; 32]) -> Result<WalletTxStatus, WalletError> {
+        let status = self
+            .snap
+            .transaction_status(TransactionId::from(txid))
+            .await?;
+        Ok(WalletTxStatus::from_domain(status))
+    }
+
+    /// The raw consensus bytes of a block, for the wallet to parse itself.
+    /// `None` when the selector names no block.
+    pub async fn raw_block(&self, at: WalletBlockSelector) -> Result<Option<Vec<u8>>, WalletError> {
+        Ok(self.snap.raw_block(at.into_domain()?).await?)
     }
 }
 
@@ -297,5 +325,105 @@ mod tests {
                 txid: [1u8; 32],
             }]
         );
+    }
+
+    /// A scripted raw transaction maps to the stable DTO, location included.
+    #[tokio::test]
+    async fn raw_transaction_maps_to_dto() {
+        use zaino_primitives::types::{RawTransaction, TransactionId, TransactionLocation};
+
+        let indexer = Indexer::new(MockIndexerService::new(MockChain {
+            raw_transactions: vec![(
+                TransactionId::from([9u8; 32]),
+                RawTransaction {
+                    data: vec![1, 2, 3],
+                    location: TransactionLocation::BestChain(
+                        Height::try_from(7).expect("valid height"),
+                    ),
+                },
+            )],
+            ..Default::default()
+        }));
+        let snapshot = indexer.snapshot().await.expect("snapshot acquired");
+
+        let raw = snapshot
+            .raw_transaction([9u8; 32])
+            .await
+            .expect("raw transaction read")
+            .expect("present");
+
+        assert_eq!(
+            raw,
+            crate::dto::WalletRawTransaction {
+                data: vec![1, 2, 3],
+                location: crate::dto::WalletTransactionLocation::BestChain(7),
+            }
+        );
+    }
+
+    /// An id naming no transaction is a served `None`, not an error.
+    #[tokio::test]
+    async fn raw_transaction_of_an_unknown_id_is_none() {
+        let indexer = Indexer::new(MockIndexerService::new(MockChain::default()));
+        let snapshot = indexer.snapshot().await.expect("snapshot acquired");
+
+        assert!(snapshot
+            .raw_transaction([0u8; 32])
+            .await
+            .expect("raw transaction read")
+            .is_none());
+    }
+
+    /// The mock reports every transaction status as `Unknown`; this proves the
+    /// adapter delegates and converts rather than fabricating an answer. The
+    /// mined/orphaned mapping itself is covered in zaino-core's own suite.
+    #[tokio::test]
+    async fn transaction_status_maps_to_dto() {
+        let indexer = Indexer::new(MockIndexerService::new(MockChain::default()));
+        let snapshot = indexer.snapshot().await.expect("snapshot acquired");
+
+        let status = snapshot
+            .transaction_status([0u8; 32])
+            .await
+            .expect("transaction status read");
+
+        assert_eq!(status, crate::dto::WalletTxStatus::Unknown);
+    }
+
+    /// A scripted raw block's bytes pass through for either selector form.
+    #[tokio::test]
+    async fn raw_block_maps_to_dto() {
+        let indexer = Indexer::new(MockIndexerService::new(MockChain {
+            raw_block: Some(vec![0xDE, 0xAD]),
+            ..Default::default()
+        }));
+        let snapshot = indexer.snapshot().await.expect("snapshot acquired");
+
+        let by_height = snapshot
+            .raw_block(crate::dto::WalletBlockSelector::Height(5))
+            .await
+            .expect("raw block read")
+            .expect("present");
+        let by_hash = snapshot
+            .raw_block(crate::dto::WalletBlockSelector::Hash([1u8; 32]))
+            .await
+            .expect("raw block read")
+            .expect("present");
+
+        assert_eq!(by_height, vec![0xDE, 0xAD]);
+        assert_eq!(by_hash, vec![0xDE, 0xAD]);
+    }
+
+    /// An unknown block is a served `None`, not an error.
+    #[tokio::test]
+    async fn raw_block_of_an_unknown_selector_is_none() {
+        let indexer = Indexer::new(MockIndexerService::new(MockChain::default()));
+        let snapshot = indexer.snapshot().await.expect("snapshot acquired");
+
+        assert!(snapshot
+            .raw_block(crate::dto::WalletBlockSelector::Height(5))
+            .await
+            .expect("raw block read")
+            .is_none());
     }
 }

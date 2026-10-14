@@ -1,7 +1,9 @@
 //! Adapter error type.
 
 use zaino_primitives::types::HeightOverflow;
-use zaino_service::error::{AddressReadError, BroadcastRejection, Transient};
+use zaino_service::error::{
+    AddressReadError, BlockReadError, BroadcastRejection, Transient, TxReadError,
+};
 
 /// A wallet-adapter failure. Chains the inner per-capability error as its
 /// `source`.
@@ -20,4 +22,10 @@ pub enum WalletError {
     /// backend failure).
     #[error(transparent)]
     AddressRead(#[from] AddressReadError),
+    /// The transaction read failed (status or the pool-decomposed form).
+    #[error(transparent)]
+    TransactionRead(#[from] TxReadError),
+    /// The block read failed (raw bytes or the domain form).
+    #[error(transparent)]
+    BlockRead(#[from] BlockReadError),
 }

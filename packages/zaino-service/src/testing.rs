@@ -153,7 +153,7 @@ pub struct MockChain {
     /// counterpart of [`block_verbose_by_hash`](Self::block_verbose_by_hash), for
     /// the same height-resolves-to-hash-once proof.
     pub decoded_block_by_hash: Option<DecodedBlock>,
-    /// Scripted raw block bytes. When `Some`, [`BlockVerboseRead::raw_block`]
+    /// Scripted raw block bytes. When `Some`, [`RawBlockRead::raw_block`]
     /// returns them for any selector; when `None`, it answers `Ok(None)`.
     pub raw_block: Option<Vec<u8>>,
     /// Scripted blocks for the timestamp-range selection behind `getblockhashes`.

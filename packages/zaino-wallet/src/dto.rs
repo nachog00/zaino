@@ -1,11 +1,15 @@
 //! Stable wallet-facing DTOs.
 //!
 //! The inner surface's domain types are converted to these here, at the adapter,
-//! so the inner primitives can evolve without breaking the embedded wallet. The
-//! conversions are one-directional (`from_domain`) and named for direction.
+//! so the inner primitives can evolve without breaking the embedded wallet.
+//! Conversions are named for direction: `from_domain` for a read coming out,
+//! `into_domain` for a caller-supplied selector going in.
 
-use zaino_primitives::types::{AddressBalance, AddressDelta, BlockRef, TransactionId, Utxo};
-use zaino_service::LocatedTxid;
+use zaino_primitives::types::{
+    AddressBalance, AddressDelta, BlockRef, BlockSelector, Height, HeightOverflow, RawTransaction,
+    TransactionId, TransactionLocation, Utxo,
+};
+use zaino_service::{LocatedTxid, TxStatus};
 
 /// The tip a pinned view is coherent as of.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -133,5 +137,87 @@ impl WalletLocatedTxid {
             block_index,
             txid: txid.into(),
         }
+    }
+}
+
+/// Where a transaction lives in the chain.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum WalletTransactionLocation {
+    /// On the best chain at this height.
+    BestChain(u32),
+    /// On a non-best chain branch (orphaned).
+    NonBestChain,
+    /// In the mempool (not yet mined).
+    Mempool,
+}
+
+impl WalletTransactionLocation {
+    fn from_domain(location: TransactionLocation) -> Self {
+        match location {
+            TransactionLocation::BestChain(height) => Self::BestChain(height.into()),
+            TransactionLocation::NonBestChain => Self::NonBestChain,
+            TransactionLocation::Mempool => Self::Mempool,
+        }
+    }
+}
+
+/// A transaction as raw serialized bytes, plus where it lives. A wallet
+/// parses these bytes itself — no decoded transaction type crosses this
+/// boundary.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct WalletRawTransaction {
+    /// The serialized transaction bytes.
+    pub data: Vec<u8>,
+    /// Where the transaction was found.
+    pub location: WalletTransactionLocation,
+}
+
+impl WalletRawTransaction {
+    pub(crate) fn from_domain(raw: RawTransaction) -> Self {
+        Self {
+            data: raw.data,
+            location: WalletTransactionLocation::from_domain(raw.location),
+        }
+    }
+}
+
+/// Whether a transaction the wallet sent has confirmed.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum WalletTxStatus {
+    /// Mined at this height on the best chain.
+    Mined(u32),
+    /// Mined, but on a branch that is no longer the best chain.
+    Orphaned,
+    /// Neither mined nor known to be orphaned (unseen, or still in the
+    /// mempool).
+    Unknown,
+}
+
+impl WalletTxStatus {
+    pub(crate) fn from_domain(status: TxStatus) -> Self {
+        match status {
+            TxStatus::Mined(height) => Self::Mined(height.into()),
+            TxStatus::Orphaned => Self::Orphaned,
+            TxStatus::Unknown => Self::Unknown,
+        }
+    }
+}
+
+/// How the caller names the block it wants: by height on the best chain, or
+/// by hash on any chain the server retains.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum WalletBlockSelector {
+    /// The block at this height on the best chain.
+    Height(u32),
+    /// The block with this hash.
+    Hash([u8; 32]),
+}
+
+impl WalletBlockSelector {
+    pub(crate) fn into_domain(self) -> Result<BlockSelector, HeightOverflow> {
+        Ok(match self {
+            Self::Height(height) => BlockSelector::Height(Height::try_from(height)?),
+            Self::Hash(hash) => BlockSelector::Hash(hash.into()),
+        })
     }
 }
