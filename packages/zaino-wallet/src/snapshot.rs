@@ -14,7 +14,8 @@ use zaino_service::{ChainSegment, FullWalletReads, ReadBudget};
 
 use crate::dto::{
     WalletAddressBalance, WalletAddressDelta, WalletBlockSelector, WalletLocatedTxid,
-    WalletRawTransaction, WalletTip, WalletTxStatus, WalletUtxo,
+    WalletRawTransaction, WalletShieldedPool, WalletSubtreeRoot, WalletTip, WalletTreestate,
+    WalletTxStatus, WalletUtxo,
 };
 use crate::WalletError;
 
@@ -137,6 +138,31 @@ impl<S: ChainSegment + FullWalletReads> WalletSnapshot<S> {
     /// `None` when the selector names no block.
     pub async fn raw_block(&self, at: WalletBlockSelector) -> Result<Option<Vec<u8>>, WalletError> {
         Ok(self.snap.raw_block(at.into_domain()?).await?)
+    }
+
+    /// The commitment trees as of the block at `at`.
+    pub async fn treestate(&self, at: u32) -> Result<WalletTreestate, WalletError> {
+        let treestate = self.snap.treestate(Height::try_from(at)?).await?;
+        Ok(WalletTreestate::from_domain(treestate))
+    }
+
+    /// Complete note-commitment subtree roots for `pool`: a run of at most
+    /// `limit` roots starting at `start_index` (all from there when `limit`
+    /// is `None`).
+    pub async fn subtree_roots(
+        &self,
+        pool: WalletShieldedPool,
+        start_index: u16,
+        limit: Option<u16>,
+    ) -> Result<Vec<WalletSubtreeRoot>, WalletError> {
+        let roots = self
+            .snap
+            .subtree_roots(pool.into_domain(), start_index, limit)
+            .await?;
+        Ok(roots
+            .into_iter()
+            .map(WalletSubtreeRoot::from_domain)
+            .collect())
     }
 }
 
@@ -425,5 +451,86 @@ mod tests {
             .await
             .expect("raw block read")
             .is_none());
+    }
+
+    /// A scripted treestate maps to the stable DTO, per-pool absence preserved.
+    #[tokio::test]
+    async fn treestate_maps_to_dto() {
+        use zaino_primitives::types::{BlockHash, PoolTreestate, Treestate};
+
+        let indexer = Indexer::new(MockIndexerService::new(MockChain {
+            treestate: Some(Treestate {
+                block_hash: BlockHash::from([6u8; 32]),
+                height: Height::try_from(100).expect("valid height"),
+                time: 1_700_000_000,
+                sapling: Some(PoolTreestate {
+                    final_root: Some([7u8; 32].into()),
+                    final_state: vec![0xAB],
+                }),
+                orchard: None,
+                ironwood: None,
+            }),
+            ..Default::default()
+        }));
+        let snapshot = indexer.snapshot().await.expect("snapshot acquired");
+
+        let treestate = snapshot.treestate(100).await.expect("treestate");
+
+        assert_eq!(
+            treestate,
+            crate::dto::WalletTreestate {
+                block_hash: [6u8; 32],
+                height: 100,
+                time: 1_700_000_000,
+                sapling: Some(crate::dto::WalletPoolTreestate {
+                    final_root: Some([7u8; 32]),
+                    final_state: vec![0xAB],
+                }),
+                orchard: None,
+                ironwood: None,
+            }
+        );
+    }
+
+    /// No scripted treestate behind the mock is not serviceable yet.
+    #[tokio::test]
+    async fn treestate_with_no_validator_behind_it_errors() {
+        let indexer = Indexer::new(MockIndexerService::new(MockChain::default()));
+        let snapshot = indexer.snapshot().await.expect("snapshot acquired");
+
+        snapshot
+            .treestate(0)
+            .await
+            .expect_err("no scripted treestate must not fabricate an answer");
+    }
+
+    /// Scripted subtree roots map to the stable DTO.
+    #[tokio::test]
+    async fn subtree_roots_map_to_dto() {
+        use zaino_primitives::types::{BlockHash, Height as PrimHeight, SubtreeRoot, TreeRoot};
+
+        let indexer = Indexer::new(MockIndexerService::new(MockChain {
+            subtree_roots: vec![SubtreeRoot {
+                root: TreeRoot::new([8u8; 32]),
+                completing_block_hash: BlockHash::from([9u8; 32]),
+                end_height: PrimHeight::try_from(50).expect("valid height"),
+            }],
+            ..Default::default()
+        }));
+        let snapshot = indexer.snapshot().await.expect("snapshot acquired");
+
+        let roots = snapshot
+            .subtree_roots(crate::dto::WalletShieldedPool::Sapling, 0, None)
+            .await
+            .expect("subtree roots");
+
+        assert_eq!(
+            roots,
+            vec![crate::dto::WalletSubtreeRoot {
+                root: [8u8; 32],
+                completing_block_hash: [9u8; 32],
+                end_height: 50,
+            }]
+        );
     }
 }

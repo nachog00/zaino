@@ -2,7 +2,8 @@
 
 use zaino_primitives::types::HeightOverflow;
 use zaino_service::error::{
-    AddressReadError, BlockReadError, BroadcastRejection, Transient, TxReadError,
+    AddressReadError, BlockReadError, BroadcastRejection, Transient, TreestateReadError,
+    TxReadError,
 };
 
 /// A wallet-adapter failure. Chains the inner per-capability error as its
@@ -28,4 +29,7 @@ pub enum WalletError {
     /// The block read failed (raw bytes or the domain form).
     #[error(transparent)]
     BlockRead(#[from] BlockReadError),
+    /// The treestate or subtree-roots read failed.
+    #[error(transparent)]
+    TreestateRead(#[from] TreestateReadError),
 }

@@ -6,8 +6,8 @@
 //! `into_domain` for a caller-supplied selector going in.
 
 use zaino_primitives::types::{
-    AddressBalance, AddressDelta, BlockRef, BlockSelector, Height, HeightOverflow, RawTransaction,
-    TransactionId, TransactionLocation, Utxo,
+    AddressBalance, AddressDelta, BlockRef, BlockSelector, Height, HeightOverflow, PoolTreestate,
+    RawTransaction, ShieldedPool, SubtreeRoot, TransactionId, TransactionLocation, Treestate, Utxo,
 };
 use zaino_service::{LocatedTxid, TxStatus};
 
@@ -219,5 +219,97 @@ impl WalletBlockSelector {
             Self::Height(height) => BlockSelector::Height(Height::try_from(height)?),
             Self::Hash(hash) => BlockSelector::Hash(hash.into()),
         })
+    }
+}
+
+/// Which shielded pool a treestate or subtree-roots query targets.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum WalletShieldedPool {
+    /// Sapling shielded pool.
+    Sapling,
+    /// Orchard shielded pool.
+    Orchard,
+    /// Ironwood shielded pool (NU6.3).
+    Ironwood,
+}
+
+impl WalletShieldedPool {
+    pub(crate) fn into_domain(self) -> ShieldedPool {
+        match self {
+            Self::Sapling => ShieldedPool::Sapling,
+            Self::Orchard => ShieldedPool::Orchard,
+            Self::Ironwood => ShieldedPool::Ironwood,
+        }
+    }
+}
+
+/// One pool's commitment tree at a block, as the opaque bytes the Zcash
+/// protocol serializes. A wallet interprets these itself.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct WalletPoolTreestate {
+    /// Root of the pool's note commitment tree after this block, when the
+    /// source reports one.
+    pub final_root: Option<[u8; 32]>,
+    /// The pool's serialized note commitment tree.
+    pub final_state: Vec<u8>,
+}
+
+impl WalletPoolTreestate {
+    fn from_domain(pool: PoolTreestate) -> Self {
+        Self {
+            final_root: pool.final_root.map(Into::into),
+            final_state: pool.final_state,
+        }
+    }
+}
+
+/// The commitment trees as of a block, and which block that is.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct WalletTreestate {
+    /// The block these trees are the state after.
+    pub block_hash: [u8; 32],
+    /// Height of that block.
+    pub height: u32,
+    /// Block time, in seconds since the Unix epoch.
+    pub time: u32,
+    /// Sapling commitment tree, if the pool is active at this height.
+    pub sapling: Option<WalletPoolTreestate>,
+    /// Orchard commitment tree, if the pool is active at this height.
+    pub orchard: Option<WalletPoolTreestate>,
+    /// Ironwood commitment tree, if the pool is active at this height.
+    pub ironwood: Option<WalletPoolTreestate>,
+}
+
+impl WalletTreestate {
+    pub(crate) fn from_domain(treestate: Treestate) -> Self {
+        Self {
+            block_hash: treestate.block_hash.into(),
+            height: treestate.height.into(),
+            time: treestate.time,
+            sapling: treestate.sapling.map(WalletPoolTreestate::from_domain),
+            orchard: treestate.orchard.map(WalletPoolTreestate::from_domain),
+            ironwood: treestate.ironwood.map(WalletPoolTreestate::from_domain),
+        }
+    }
+}
+
+/// A single note-commitment subtree root entry.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct WalletSubtreeRoot {
+    /// The root hash of this subtree.
+    pub root: [u8; 32],
+    /// The hash of the block that completed this subtree.
+    pub completing_block_hash: [u8; 32],
+    /// The height at which this subtree was completed.
+    pub end_height: u32,
+}
+
+impl WalletSubtreeRoot {
+    pub(crate) fn from_domain(root: SubtreeRoot) -> Self {
+        Self {
+            root: root.root.into(),
+            completing_block_hash: root.completing_block_hash.into(),
+            end_height: root.end_height.into(),
+        }
     }
 }
