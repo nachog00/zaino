@@ -16,11 +16,13 @@
 
 mod dto;
 mod error;
+mod snapshot;
 
 pub use dto::{WalletTip, WalletTxId};
 pub use error::WalletError;
+pub use snapshot::WalletSnapshot;
 
-use zaino_service::{ChainSegment, FullWalletService};
+use zaino_service::FullWalletService;
 
 /// The indexer a full wallet library queries, over a [`FullWalletService`] engine.
 pub struct Indexer<W: FullWalletService> {
@@ -32,11 +34,11 @@ impl<W: FullWalletService> Indexer<W> {
         Self { engine }
     }
 
-    /// The tip the current best chain is pinned to, as a wallet DTO. `None` when
-    /// the chain has no tip yet.
-    pub async fn tip(&self) -> Result<Option<WalletTip>, WalletError> {
-        let snapshot = self.engine.snapshot().await?;
-        Ok(snapshot.pinned_tip().map(WalletTip::from_domain))
+    /// Pin the current view, for every read that must stay coherent against
+    /// one tip.
+    pub async fn snapshot(&self) -> Result<WalletSnapshot<W::Snapshot>, WalletError> {
+        let snap = self.engine.snapshot().await?;
+        Ok(WalletSnapshot { snap })
     }
 
     /// Relay a signed transaction; returns its id.
@@ -48,32 +50,8 @@ impl<W: FullWalletService> Indexer<W> {
 
 #[cfg(test)]
 mod tests {
-    use super::{Indexer, WalletTip, WalletTxId};
-    use zaino_primitives::types::{BlockHash, BlockRef, Height};
+    use super::{Indexer, WalletTxId};
     use zaino_service::testing::{MockChain, MockIndexerService};
-
-    /// The adapter binds only `FullWalletService`, pins a snapshot, and maps the
-    /// domain tip to a stable DTO.
-    #[tokio::test]
-    async fn tip_maps_to_dto() {
-        let tip = BlockRef {
-            height: Height::try_from(42).expect("valid height"),
-            hash: BlockHash::from([7u8; 32]),
-        };
-        let indexer = Indexer::new(MockIndexerService::new(MockChain {
-            tip: Some(tip),
-            ..Default::default()
-        }));
-
-        let dto = indexer.tip().await.expect("tip").expect("some tip");
-        assert_eq!(
-            dto,
-            WalletTip {
-                height: 42,
-                hash: [7u8; 32]
-            }
-        );
-    }
 
     /// Broadcast routes through the control capability and maps the id out.
     #[tokio::test]
