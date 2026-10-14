@@ -45,10 +45,23 @@ hashes) a block's own bytes cannot give, kept a separate trait from `BlockRead`
 for the same reason `RawTransactionRead` and `TransactionRead` are split — one
 returns the domain block every consumer uses, the other an explorer-only
 surface. The block page composes the two into one `getblock(_, 2)` response.
-`BlockVerboseRead` also carries `raw_block`, the consensus bytes of the block
-`at` — the always-passthrough `getblock(_, 0)` surface the explorer's search page
-calls to test whether a string is a block. A selector naming no block is
-`Ok(None)` at each of the three reads.
+A selector naming no block is `Ok(None)` at both reads.
+
+`raw_block`, the consensus bytes of the block `at`, lives on its own
+`RawBlockRead` trait rather than on `BlockVerboseRead`: a full wallet wants
+these bytes to parse itself (the same precedent `RawTransactionRead` sets for
+transactions), but never the chain-position overlay, so `FullWalletReads`
+carries `RawBlockRead` without `BlockVerboseRead`. `NodeRpcReads` carries both
+— it is also the always-passthrough `getblock(_, 0)` surface the explorer's
+search page calls to test whether a string is a block. A selector naming no
+block is `Ok(None)`.
+
+`FullWalletReads` also carries `TransactionRead`, for `transaction_status`
+alone: whether a transaction the wallet sent has been mined, orphaned, or is
+unknown. The pool-decomposed `TransactionRead::transaction` comes bundled with
+it — one trait, both methods — but a full-wallet adapter has no obligation to
+expose that method; it already has the transaction's bytes from
+`RawTransactionRead`.
 
 `NodeRpcReads` also carries `TransactionViewRead`, the resolved-transaction
 surface behind `getrawtransaction <txid> 1` and `getblock <block> 2`:
