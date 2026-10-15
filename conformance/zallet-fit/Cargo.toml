@@ -1,0 +1,40 @@
+[workspace]
+members = ["."]
+resolver = "2"
+
+[package]
+name = "zallet-conformance-probe"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = """
+NOT a production crate. A real (non-mirrored) conformance check: does
+zaino-wallet's Indexer/WalletSnapshot satisfy zallet-core's actual
+Chain/ChainView trait? Its own standalone workspace (own Cargo.lock), the
+same way zallet's own backends/* crates are, so pulling zallet-core's full
+dependency tree never touches the main zaino workspace's lockfile. See
+zaino-design/cases/2026-10-14-zallet-fit-real-acid-test.md for the history.
+"""
+
+[dependencies]
+zaino-wallet = { path = "../../packages/zaino-wallet" }
+zaino-service = { path = "../../packages/zaino-service" }
+futures = "0.3"
+
+zallet-core = { git = "https://github.com/zcash/zallet", branch = "main" }
+zcash_client_backend = "0.24"
+zcash_primitives = "0.30"
+zcash_protocol = "0.10"
+orchard = "0.15"
+sapling = { package = "sapling-crypto", version = "0.7" }
+transparent = { package = "zcash_transparent", version = "0.10" }
+
+[dev-dependencies]
+zaino-primitives = { path = "../../packages/zaino-primitives" }
+zaino-service = { path = "../../packages/zaino-service", features = ["testing"] }
+tokio = { version = "1", features = ["macros", "rt"] }
+proptest = "1"
+# `test-dependencies` pulls zcash_primitives's `arb_tx` strategy for the
+# broadcast test, so it constructs one real, well-formed Transaction (proving
+# broadcast_transaction really serializes it) rather than a hand-rolled stand-in.
+zcash_primitives = { version = "0.30", features = ["test-dependencies"] }
