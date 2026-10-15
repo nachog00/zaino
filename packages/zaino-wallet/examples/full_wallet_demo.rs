@@ -38,6 +38,12 @@ use zaino_wallet::{
 
 const ADDR: &str = "t1exampleaddress000000000000000000";
 
+/// Lowercase hex, for printing byte arrays readably instead of as a raw
+/// `Debug` dump of a `[u8; N]`.
+fn hex(bytes: impl AsRef<[u8]>) -> String {
+    bytes.as_ref().iter().map(|b| format!("{b:02x}")).collect()
+}
+
 #[tokio::main(flavor = "current_thread")]
 async fn main() {
     println!("=== zaino-wallet demo: scripting a mock chain ===\n");
@@ -117,21 +123,28 @@ async fn main() {
         .reported_upgrades()
         .await
         .expect("reported_upgrades");
-    println!("reported_upgrades() -> {upgrades:?} (mock reports none)");
+    println!(
+        "reported_upgrades() -> {} entries (mock reports none)",
+        upgrades.len()
+    );
     assert!(upgrades.is_empty());
 
     let txid = indexer
         .broadcast(vec![0x01, 0x02, 0x03])
         .await
         .expect("broadcast");
-    println!("broadcast(..) -> {txid:?}");
+    println!("broadcast(..) -> txid {}", hex(txid.0));
 
     let tip_event = indexer
         .subscribe_tip()
         .next()
         .await
         .expect("current tip event");
-    println!("subscribe_tip() first event -> {tip_event:?}");
+    println!(
+        "subscribe_tip() first event -> height {}, hash {}",
+        tip_event.tip.height,
+        hex(tip_event.tip.hash)
+    );
     assert_eq!(
         tip_event.tip,
         WalletTip {
@@ -145,7 +158,11 @@ async fn main() {
         .next()
         .await
         .expect("scripted mempool entry");
-    println!("subscribe_mempool() first event -> {mempool_event:?}\n");
+    println!(
+        "subscribe_mempool() first event -> txid {}, validated against height {}\n",
+        hex(mempool_event.txid.0),
+        mempool_event.validated_against.height
+    );
     assert_eq!(mempool_event.txid.0, [0x22; 32]);
 
     // --- Pinned reads (WalletSnapshot) -----------------------------------
@@ -154,7 +171,11 @@ async fn main() {
     let snapshot = indexer.snapshot().await.expect("a coherent snapshot");
 
     let snapshot_tip = snapshot.tip().expect("the chain has a tip");
-    println!("tip() -> {snapshot_tip:?}");
+    println!(
+        "tip() -> height {}, hash {}",
+        snapshot_tip.height,
+        hex(snapshot_tip.hash)
+    );
     assert_eq!(
         snapshot_tip,
         WalletTip {
@@ -167,7 +188,10 @@ async fn main() {
         .address_balance(ADDR, 0, 1_000)
         .await
         .expect("address_balance");
-    println!("address_balance({ADDR:?}, 0..=1000) -> {balance:?}");
+    println!(
+        "address_balance({ADDR:?}, 0..=1000) -> balance {} zat, received {} zat",
+        balance.balance, balance.received
+    );
     assert_eq!(
         balance,
         WalletAddressBalance {
@@ -177,7 +201,15 @@ async fn main() {
     );
 
     let utxos = snapshot.address_utxos(ADDR).await.expect("address_utxos");
-    println!("address_utxos({ADDR:?}) -> {utxos:?}");
+    for u in &utxos {
+        println!(
+            "address_utxos({ADDR:?}) -> txid {} output {} at height {}, {} zat",
+            hex(u.txid),
+            u.output_index,
+            u.height,
+            u.satoshis
+        );
+    }
     assert_eq!(
         utxos,
         vec![WalletUtxo {
@@ -194,7 +226,14 @@ async fn main() {
         .address_deltas(ADDR, 0, 1_000)
         .await
         .expect("address_deltas");
-    println!("address_deltas({ADDR:?}, 0..=1000) -> {deltas:?}");
+    for d in &deltas {
+        println!(
+            "address_deltas({ADDR:?}, 0..=1000) -> {} zat at height {}, txid {}",
+            d.satoshis,
+            d.height,
+            hex(d.txid)
+        );
+    }
     assert_eq!(
         deltas,
         vec![WalletAddressDelta {
@@ -211,7 +250,13 @@ async fn main() {
         .address_tx_ids(ADDR, 0, 1_000)
         .await
         .expect("address_tx_ids");
-    println!("address_tx_ids({ADDR:?}, 0..=1000) -> {tx_ids:?}");
+    for t in &tx_ids {
+        println!(
+            "address_tx_ids({ADDR:?}, 0..=1000) -> txid {}, height {:?}",
+            hex(t.txid),
+            t.height
+        );
+    }
     assert_eq!(
         tx_ids,
         vec![WalletLocatedTxid {
@@ -226,7 +271,12 @@ async fn main() {
         .await
         .expect("raw_transaction read")
         .expect("the scripted transaction");
-    println!("raw_transaction([0x11; 32]) -> {raw_tx:?}");
+    println!(
+        "raw_transaction(..) -> {} bytes: {}, location {:?}",
+        raw_tx.data.len(),
+        hex(&raw_tx.data),
+        raw_tx.location
+    );
     assert_eq!(
         raw_tx,
         WalletRawTransaction {
@@ -239,7 +289,7 @@ async fn main() {
         .transaction_status([0x11; 32])
         .await
         .expect("transaction_status read");
-    println!("transaction_status([0x11; 32]) -> {status:?} (the mock always answers Unknown)");
+    println!("transaction_status(..) -> {status:?} (the mock always answers Unknown)");
     assert_eq!(status, WalletTxStatus::Unknown);
 
     let raw_block = snapshot
@@ -247,11 +297,21 @@ async fn main() {
         .await
         .expect("raw_block read")
         .expect("the scripted block");
-    println!("raw_block(Height(1000)) -> {raw_block:?}");
+    println!(
+        "raw_block(Height(1000)) -> {} bytes: {}",
+        raw_block.len(),
+        hex(&raw_block)
+    );
     assert_eq!(raw_block, vec![0x00, 0x01, 0x02, 0x03]);
 
     let treestate = snapshot.treestate(1_000).await.expect("treestate read");
-    println!("treestate(1000) -> {treestate:?}");
+    println!(
+        "treestate(1000) -> block {}, height {}, sapling active: {}, orchard active: {}",
+        hex(treestate.block_hash),
+        treestate.height,
+        treestate.sapling.is_some(),
+        treestate.orchard.is_some(),
+    );
     assert_eq!(
         treestate,
         WalletTreestate {
@@ -271,7 +331,13 @@ async fn main() {
         .subtree_roots(WalletShieldedPool::Sapling, 0, None)
         .await
         .expect("subtree_roots read");
-    println!("subtree_roots(Sapling, 0, None) -> {roots:?}");
+    for r in &roots {
+        println!(
+            "subtree_roots(Sapling, 0, None) -> root {}, completed at height {}",
+            hex(r.root),
+            r.end_height
+        );
+    }
     assert_eq!(
         roots,
         vec![WalletSubtreeRoot {
